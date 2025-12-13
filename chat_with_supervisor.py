@@ -9,10 +9,7 @@ import asyncio
 from typing import List, Dict
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from agents.supervisor_agent import SupervisorAgent
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
+from settings import settings
 
 # Page configuration
 st.set_page_config(
