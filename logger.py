@@ -1,45 +1,28 @@
 import sys
 import logging
 import structlog
-from pathlib import Path
-from datetime import datetime
 
 
 def setup_logger(log_file_path: str = None) -> structlog.BoundLogger:
     """
-    Configure and return a structured logger with both console and file handlers.
+    Configure and return a structured logger with console output only.
+    Logs are written to stdout for Docker container log aggregation.
 
     Args:
-        log_file_path (str, optional): Path to the log file. If None, logs will be 
-                                      created in 'logs' directory with timestamp.
+        log_file_path (str, optional): Deprecated, kept for backwards
+        compatibility. Logs are only written to stdout.
 
     Returns:
         structlog.BoundLogger: Configured structured logger
     """
-    # Create logs directory if it doesn't exist
-    if log_file_path is None:
-        logs_dir = Path("logs")
-        logs_dir.mkdir(exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_file_path = str(logs_dir / f"application_{timestamp}.log")
-
-    # Set up standard logging with timestamp format
+    # Set up standard logging to stdout only
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         stream=sys.stdout,
-        level=logging.DEBUG,
+        level=logging.DEBUG,  # Changed from DEBUG to INFO for cleaner logs
+        force=True,  # Override any existing configuration
     )
-
-    # Create file handler with timestamp format
-    file_handler = logging.FileHandler(log_file_path)
-    file_handler.setLevel(logging.DEBUG)
-    file_formatter = logging.Formatter(
-        "%(asctime)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
-    )
-    file_handler.setFormatter(file_formatter)
-    logging.getLogger().addHandler(file_handler)
 
     # Configure structlog processors
     processors = [
@@ -50,7 +33,7 @@ def setup_logger(log_file_path: str = None) -> structlog.BoundLogger:
         structlog.processors.format_exc_info,
         structlog.processors.ExceptionPrettyPrinter(),
         structlog.processors.UnicodeDecoder(),
-        structlog.processors.JSONRenderer()
+        structlog.processors.JSONRenderer(),
     ]
 
     # Configure structlog
