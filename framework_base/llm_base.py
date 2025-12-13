@@ -19,7 +19,7 @@ class LLMFactory:
         model_type: str = "completion",  # "completion" or "chat"
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
-        **kwargs
+        **kwargs,
     ) -> Union[Ollama, ChatOllama, Bedrock, BedrockChat, ChatOpenAI]:
         """
         Create and return an LLM instance based on the provider and model.
@@ -33,7 +33,8 @@ class LLMFactory:
             **kwargs: Additional arguments for specific providers
 
         Returns:
-            Union[Ollama, ChatOllama, Bedrock, BedrockChat]: Configured LLM instance
+            Union[Ollama, ChatOllama, Bedrock, BedrockChat]: Configured
+            LLM instance
         """
         try:
             if provider.lower() == "ollama":
@@ -57,7 +58,7 @@ class LLMFactory:
                         temperature=temperature,
                         max_tokens=max_tokens,
                         model_type="chat",
-                        **kwargs
+                        **kwargs,
                     )
                 else:
                     return LLMFactory._create_bedrock(
@@ -65,21 +66,21 @@ class LLMFactory:
                         temperature=temperature,
                         max_tokens=max_tokens,
                         model_type="completion",
-                        **kwargs
+                        **kwargs,
                     )
             elif provider.lower() == "litellm":
                 return LLMFactory._create_litellm_chat(
                     model_name=model_name,
                     temperature=temperature,
                     max_tokens=max_tokens,
-                    **kwargs
+                    **kwargs,
                 )
 
             else:
                 raise ValueError(f"Unsupported provider: {provider}")
 
         except Exception as e:
-            print(f"Failed to initialize Amazon Q LLM: {e}")
+            print(f"Failed to initialize {provider} LLM: {e}")
             raise e
 
     @staticmethod
@@ -87,31 +88,57 @@ class LLMFactory:
         model_name: str,
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
-        **kwargs
-    ) -> ChatOpenAI:
-        """Create a ChatOpenAI instance for litellm"""
-        return ChatOpenAI(
-            model=model_name,
-            openai_api_base="http://0.0.0.0:4000",
-            openai_api_key="dummy-key",
-            temperature=temperature,
-            max_tokens=max_tokens,
-            **kwargs
-        )
+        **kwargs,
+    ) -> Union[ChatOllama, ChatOpenAI]:
+        """
+        Create a ChatOpenAI instance for litellm.
+        If model_name starts with 'ollama/', uses ollama.
+        Otherwise uses OpenAI directly with provided API key.
+        """
+        if model_name.startswith("ollama/"):
+            # Remove ollama/ prefix and use ollama provider
+            actual_model = model_name.replace("ollama/", "")
+            base_url = kwargs.get("base_url", "http://localhost:11434")
+
+            ollama_kwargs = {
+                "model": actual_model,
+                "base_url": base_url,
+                "temperature": temperature,
+            }
+
+            # Add max_tokens if provided (ollama uses num_predict)
+            if max_tokens:
+                ollama_kwargs["num_predict"] = max_tokens
+
+            return ChatOllama(**ollama_kwargs)
+        else:
+            # Use OpenAI directly (for OpenAI or Bedrock models)
+            # Filter out ollama-specific kwargs that would break OpenAI API
+            openai_kwargs = {
+                k: v for k, v in kwargs.items()
+                if k not in ["base_url", "timeout"]
+            }
+
+            # OpenAI API now uses max_completion_tokens instead of max_tokens
+            if max_tokens:
+                openai_kwargs["max_completion_tokens"] = max_tokens
+
+            return ChatOpenAI(
+                model=model_name, temperature=temperature, **openai_kwargs
+            )
 
     @staticmethod
     def _create_ollama(
         model_name: str,
         temperature: float = 0.7,
         base_url: str = "http://localhost:11434",
-        **kwargs
+        **kwargs,
     ) -> Ollama:
         """Create an Ollama completion instance"""
         return Ollama(
             model=model_name,
             base_url=base_url,
-            temperature=temperature,
-            timeout=kwargs.get('timeout', 120)
+            temperature=temperature
         )
 
     @staticmethod
@@ -119,15 +146,13 @@ class LLMFactory:
         model_name: str,
         temperature: float = 0.7,
         base_url: str = "http://localhost:11434",
-        **kwargs
+        **kwargs,
     ) -> ChatOllama:
         """Create an Ollama chat instance"""
         return ChatOllama(
             model=model_name,
             base_url=base_url,
-            temperature=temperature,
-            timeout=kwargs.get('timeout', 120),
-            streaming=kwargs.get('streaming', False)
+            temperature=temperature
         )
 
     @staticmethod
@@ -136,38 +161,69 @@ class LLMFactory:
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         model_type: str = "completion",
-        **kwargs
+        **kwargs,
     ) -> Union[Bedrock, BedrockChat]:
         """Create a Bedrock instance"""
+        import boto3
 
         model_id_mapping = {
-            "claude3": "anthropic.claude-3-sonnet-20240229-v1:0",
-            "claude2": "anthropic.claude-v2",
-            "claude-instant": "anthropic.claude-instant-v1",
-            "titan": "amazon.titan-text-express-v1",
-            "llama2": "meta.llama2-70b-chat-v1"
+            "claude3": {
+                "model_id": "anthropic.claude-3-sonnet-20240229-v1:0",
+                "anthropic_version": "bedrock-2023-05-31",
+            },
+            "claude2": {
+                "model_id": "anthropic.claude-v2",
+                "anthropic_version": "bedrock-2023-05-31",
+            },
+            "claude-instant": {
+                "model_id": "anthropic.claude-instant-v1",
+                "anthropic_version": "bedrock-2023-05-31",
+            },
+            "titan": {"model_id": "amazon.titan-text-express-v1"},
+            "llama2": {"model_id": "meta.llama2-70b-chat-v1"},
         }
 
-        model_id = model_id_mapping.get(model_name.lower(), model_name)
+        model_config = model_id_mapping.get(model_name.lower())
+        if model_config:
+            model_id = model_config["model_id"]
+            anthropic_version = model_config.get("anthropic_version")
+        else:
+            model_id = model_name
+            # Detect if it's an anthropic model by checking the model_id
+            anthropic_version = (
+                "bedrock-2023-05-31" if "anthropic"
+                in model_name.lower() else None
+            )
+        region_name = kwargs.get("region_name", "us-east-1")
+
+        # Create boto3 client for Bedrock
+        session_kwargs = {}
+        if kwargs.get("profile_name"):
+            session_kwargs["profile_name"] = kwargs.get("profile_name")
+
+        session = boto3.Session(**session_kwargs)
+        client = session.client(
+            service_name="bedrock-runtime",
+            region_name=region_name
+        )
 
         model_kwargs = {
             "temperature": temperature,
-            "max_tokens": max_tokens
         }
 
-        if "anthropic" in model_id and model_type == "chat":
-            model_kwargs["anthropic_version"] = "bedrock-2023-05-31"
+        # Only add max_tokens if provided
+        if max_tokens:
+            model_kwargs["max_tokens"] = max_tokens
+
+        if anthropic_version and model_type == "chat":
             return BedrockChat(
+                client=client,
                 model_id=model_id,
-                model_kwargs=model_kwargs,
-                region_name=kwargs.get('region_name', 'us-east-1'),
-                credentials_profile_name=kwargs.get('profile_name')
+                model_kwargs=model_kwargs
             )
         else:
             return Bedrock(
+                client=client,
                 model_id=model_id,
-                model_kwargs=model_kwargs,
-                region_name=kwargs.get('region_name', 'us-east-1'),
-                credentials_profile_name=kwargs.get('profile_name')
+                model_kwargs=model_kwargs
             )
-
