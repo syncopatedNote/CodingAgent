@@ -17,13 +17,12 @@ from framework_base.llm_base import LLMFactory
 from framework_base.multi_server_mcp_client import multi_server_mcp_client
 from agents.models.jira_response_model import JiraResponse
 from pydantic import ValidationError
-from dotenv import load_dotenv
-
-load_dotenv()
+from settings import settings
 
 
 class SearchType(Enum):
     """Types of searches the agent can perform"""
+
     CONFLUENCE_SEARCH = "confluence_search"
     JIRA_TICKET_LOOKUP = "jira_ticket_lookup"
     JIRA_SEARCH = "jira_search"
@@ -32,6 +31,7 @@ class SearchType(Enum):
 
 class SearchState(TypedDict):
     """State for the search agent workflow"""
+
     messages: Annotated[List[BaseMessage], "Conversation messages"]
     search_query: str
     search_type: Optional[SearchType]
@@ -54,7 +54,7 @@ class SearchAgent:
         # Build the workflow graph
         self.graph = self._build_graph()
 
-    def _build_graph(self) -> StateGraph:
+    def _build_graph(self):
         """Build the search workflow graph"""
         workflow = StateGraph(SearchState)
 
@@ -77,36 +77,27 @@ class SearchAgent:
                 "confluence_search": "search_confluence",
                 "jira_ticket_lookup": "lookup_jira_ticket",
                 "jira_search": "search_jira",
-                "error": "handle_error"
-            }
+                "error": "handle_error",
+            },
         )
 
         # All search operations route to formatting
         workflow.add_conditional_edges(
             "search_confluence",
             self._route_after_search,
-            {
-                "format": "format_results",
-                "error": "handle_error"
-            }
+            {"format": "format_results", "error": "handle_error"},
         )
 
         workflow.add_conditional_edges(
             "lookup_jira_ticket",
             self._route_after_search,
-            {
-                "format": "format_results",
-                "error": "handle_error"
-            }
+            {"format": "format_results", "error": "handle_error"},
         )
 
         workflow.add_conditional_edges(
             "search_jira",
             self._route_after_search,
-            {
-                "format": "format_results",
-                "error": "handle_error"
-            }
+            {"format": "format_results", "error": "handle_error"},
         )
 
         # End nodes
@@ -139,31 +130,51 @@ class SearchAgent:
             "jira_tickets": [],
             "confluence_keywords": [],
             "search_keywords": [],
-            "project_names": []
+            "project_names": [],
         }
 
         # Extract Jira ticket patterns (e.g., PROJ-123, ABC-456)
-        jira_pattern = r'\b[A-Z]+-\d+\b'
+        jira_pattern = r"\b[A-Z]+-\d+\b"
         jira_matches = re.findall(jira_pattern, query)
         entities["jira_tickets"] = jira_matches
 
         # Extract Confluence-specific keywords
-        confluence_keywords = ["documentation", "wiki", "page", "confluence", "design", "spec"]
-        found_confluence_keywords = [kw for kw in confluence_keywords if kw.lower() in query.lower()]
+        confluence_keywords = [
+            "documentation",
+            "wiki",
+            "page",
+            "confluence",
+            "design",
+            "spec",
+        ]
+        found_confluence_keywords = [
+            kw for kw in confluence_keywords if kw.lower() in query.lower()
+        ]
         entities["confluence_keywords"] = found_confluence_keywords
 
         # Extract general search keywords (words longer than 3 characters)
-        words = re.findall(r'\b\w{4,}\b', query.lower())
+        words = re.findall(r"\b\w{4,}\b", query.lower())
         # Filter out common words
-        stop_words = {"with", "from", "that", "this", "have", "will", "been", "were", "they", "there"}
+        stop_words = {
+            "with",
+            "from",
+            "that",
+            "this",
+            "have",
+            "will",
+            "been",
+            "were",
+            "they",
+            "there",
+        }
         keywords = [word for word in words if word not in stop_words]
         entities["search_keywords"] = keywords[:5]  # Limit to 5 keywords
 
         # Extract potential project names (uppercase words)
-        project_pattern = r'\b[A-Z]{2,10}\b'
+        project_pattern = r"\b[A-Z]{2,10}\b"
         project_matches = re.findall(project_pattern, query)
         # Filter out Jira ticket prefixes
-        jira_prefixes = [ticket.split('-')[0] for ticket in jira_matches]
+        jira_prefixes = [ticket.split("-")[0] for ticket in jira_matches]
         projects = [proj for proj in project_matches if proj not in jira_prefixes]
         entities["project_names"] = projects
 
@@ -178,13 +189,17 @@ class SearchAgent:
             return SearchType.JIRA_TICKET_LOOKUP
 
         # If Confluence-specific keywords are present
-        elif entities["confluence_keywords"] or any(kw in query_lower for kw in 
-                                                   ["confluence", "documentation", "wiki", "page", "design"]):
+        elif entities["confluence_keywords"] or any(
+            kw in query_lower
+            for kw in ["confluence", "documentation", "wiki", "page", "design"]
+        ):
             return SearchType.CONFLUENCE_SEARCH
 
         # If Jira-specific keywords are present
-        elif any(kw in query_lower for kw in 
-                ["jira", "ticket", "issue", "bug", "story", "epic", "task"]):
+        elif any(
+            kw in query_lower
+            for kw in ["jira", "ticket", "issue", "bug", "story", "epic", "task"]
+        ):
             return SearchType.JIRA_SEARCH
 
         # Default to Confluence search for general queries
@@ -196,24 +211,28 @@ class SearchAgent:
         try:
             # Build search query from keywords
             keywords = state["extracted_entities"].get("search_keywords", [])
-            confluence_keywords = state["extracted_entities"].get("confluence_keywords", [])
+            confluence_keywords = state["extracted_entities"].get(
+                "confluence_keywords", []
+            )
 
             # Combine keywords for search
             all_keywords = keywords + confluence_keywords
-            search_terms = " ".join(all_keywords[:3]) if all_keywords else state["search_query"]
+            search_terms = (
+                " ".join(all_keywords[:3]) if all_keywords else state["search_query"]
+            )
 
             # Call Confluence search MCP tool using the proper session pattern
             async with multi_server_mcp_client.session("atlassian") as session:
                 tools = await load_mcp_tools(session)
                 confluence_search_tool = next(
-                    (tool for tool in tools if "confluence_search" in tool.name), None)
-                
+                    (tool for tool in tools if "confluence_search" in tool.name), None
+                )
+
                 if confluence_search_tool:
-                    search_result = await confluence_search_tool.ainvoke({
-                        "query": search_terms,
-                        "limit": 5
-                    })
-                    
+                    search_result = await confluence_search_tool.ainvoke(
+                        {"query": search_terms, "limit": 5}
+                    )
+
                     if search_result:
                         # Parse the results if they're in string format
                         if isinstance(search_result, str):
@@ -223,8 +242,11 @@ class SearchAgent:
                                 results_data = {"results": []}
                         else:
                             results_data = search_result
-                        
-                        state["search_results"] = results_data.get("results", results_data if isinstance(results_data, list) else [])
+
+                        state["search_results"] = results_data.get(
+                            "results",
+                            results_data if isinstance(results_data, list) else [],
+                        )
                     else:
                         state["search_results"] = []
                 else:
@@ -245,41 +267,50 @@ class SearchAgent:
                 return state
 
             results = []
-            
+
             async with multi_server_mcp_client.session("atlassian") as session:
                 tools = await load_mcp_tools(session)
                 jira_get_issue_tool = next(
-                    (tool for tool in tools if "jira_get_issue" in tool.name), None)
-                
+                    (tool for tool in tools if "jira_get_issue" in tool.name), None
+                )
+
                 if not jira_get_issue_tool:
                     state["error_message"] = "Jira get issue tool not available"
                     return state
-                
+
                 for ticket_key in jira_tickets:
                     try:
                         # Get detailed ticket information using MCP tool
-                        ticket_result = await jira_get_issue_tool.ainvoke({
-                            "issue_key": ticket_key,
-                            "fields": "summary,description,status,assignee,reporter,priority,issuetype,created,updated,labels",
-                            "comment_limit": 5
-                        })
+                        ticket_result = await jira_get_issue_tool.ainvoke(
+                            {
+                                "issue_key": ticket_key,
+                                "fields": "summary,description,status,assignee,reporter,priority,issuetype,created,updated,labels",
+                                "comment_limit": 5,
+                            }
+                        )
 
                         if ticket_result:
                             if isinstance(ticket_result, str):
                                 try:
                                     ticket_info = json.loads(ticket_result)
                                 except json.JSONDecodeError:
-                                    ticket_info = {"error": f"Invalid response format for {ticket_key}"}
+                                    ticket_info = {
+                                        "error": f"Invalid response format for {ticket_key}"
+                                    }
                             else:
                                 ticket_info = ticket_result
-                            
+
                             results.append(ticket_info)
                         else:
-                            results.append({"error": f"No data returned for {ticket_key}"})
+                            results.append(
+                                {"error": f"No data returned for {ticket_key}"}
+                            )
 
                     except Exception as e:
                         # Continue with other tickets if one fails
-                        results.append({"error": f"Failed to fetch {ticket_key}: {str(e)}"})
+                        results.append(
+                            {"error": f"Failed to fetch {ticket_key}: {str(e)}"}
+                        )
 
             state["search_results"] = results
 
@@ -298,14 +329,17 @@ class SearchAgent:
             async with multi_server_mcp_client.session("atlassian") as session:
                 tools = await load_mcp_tools(session)
                 jira_search_tool = next(
-                    (tool for tool in tools if "jira_search" in tool.name), None)
-                
+                    (tool for tool in tools if "jira_search" in tool.name), None
+                )
+
                 if jira_search_tool:
-                    search_result = await jira_search_tool.ainvoke({
-                        "jql": jql_query,
-                        "limit": 10,
-                        "fields": "summary,status,assignee,priority,issuetype,updated,created"
-                    })
+                    search_result = await jira_search_tool.ainvoke(
+                        {
+                            "jql": jql_query,
+                            "limit": 10,
+                            "fields": "summary,status,assignee,priority,issuetype,updated,created",
+                        }
+                    )
 
                     if search_result:
                         if isinstance(search_result, str):
@@ -315,7 +349,7 @@ class SearchAgent:
                                 results_data = {"issues": []}
                         else:
                             results_data = search_result
-                        
+
                         state["search_results"] = results_data.get("issues", [])
                     else:
                         state["search_results"] = []
@@ -362,7 +396,7 @@ class SearchAgent:
 
         # Add time-based filters
         if "recent" in query or "latest" in query:
-            jql_parts.append('updated >= -7d')
+            jql_parts.append("updated >= -7d")
 
         # Combine parts or use default
         if jql_parts:
@@ -387,7 +421,9 @@ class SearchAgent:
             elif search_type == SearchType.JIRA_SEARCH:
                 state["formatted_response"] = self._format_jira_search_results(results)
             else:
-                state["formatted_response"] = "Search completed but results format not recognized."
+                state["formatted_response"] = (
+                    "Search completed but results format not recognized."
+                )
 
         except Exception as e:
             state["error_message"] = f"Error formatting results: {str(e)}"
@@ -413,17 +449,17 @@ class SearchAgent:
             formatted_parts.append(f"## {i}. 📄 {title}")
             formatted_parts.append("")
             formatted_parts.append(f"**Space:** {space}")
-            
+
             if excerpt:
                 # Clean up excerpt and limit length
                 clean_excerpt = " ".join(excerpt.split())
                 if len(clean_excerpt) > 200:
                     clean_excerpt = clean_excerpt[:200] + "..."
                 formatted_parts.append(f"**Excerpt:** {clean_excerpt}")
-            
+
             if url:
                 formatted_parts.append(f"**Link:** [View Page]({url})")
-            
+
             formatted_parts.append("")
             formatted_parts.append("---")
             formatted_parts.append("")
@@ -432,19 +468,21 @@ class SearchAgent:
 
     def _format_jira_ticket_details(self, results: List[Dict]) -> str:
         """
-        Format detailed Jira ticket information using Pydantic model for validation and parsing.
-        
+        Format detailed Jira ticket information using Pydantic model
+        for validation and parsing.
+
         Args:
             results: List of raw Jira ticket data from API
-            
+
         Returns:
-            Formatted string representation of ticket details with improved readability
+            Formatted string representation of ticket details with\
+            improved readability
         """
         if not results:
             return "No Jira tickets found."
 
         formatted_parts = []
-        
+
         # Add header if multiple tickets
         if len(results) > 1:
             formatted_parts.append(f"# 📋 Found {len(results)} Jira Ticket(s)")
@@ -453,132 +491,166 @@ class SearchAgent:
         for i, result in enumerate(results, 1):
             # Handle error responses
             if "error" in result:
-                formatted_parts.append(f"❌ **Error for ticket {i}:** {result['error']}")
+                formatted_parts.append(
+                    f"❌ **Error for ticket {i}:** {result['error']}"
+                )
                 formatted_parts.append("")
                 continue
 
             try:
                 # Parse the raw result using Pydantic model
                 jira_issue = JiraResponse(**result)
-                
+
                 # Add ticket number prefix for multiple tickets
                 if len(results) > 1:
                     formatted_parts.append(f"### Ticket {i} of {len(results)}")
                     formatted_parts.append("")
-                
+
                 # Format using the validated Pydantic model
                 formatted_ticket = self._format_single_jira_ticket(jira_issue)
                 formatted_parts.append(formatted_ticket)
-                
+
             except ValidationError as e:
                 # Handle validation errors gracefully
                 key = result.get("key", "Unknown")
-                formatted_parts.append(f"❌ **Error parsing ticket {key}:** Invalid data format")
+                formatted_parts.append(
+                    f"❌ **Error parsing ticket {key}:** Invalid data format"
+                )
                 formatted_parts.append(f"**Validation errors:** {str(e)}")
                 formatted_parts.append("")
-                
+
             except Exception as e:
                 # Handle any other parsing errors
                 key = result.get("key", "Unknown")
-                formatted_parts.append(f"❌ **Error processing ticket {key}:** {str(e)}")
+                formatted_parts.append(
+                    f"❌ **Error processing ticket {key}:** {str(e)}"
+                )
                 formatted_parts.append("")
 
         return "\n".join(formatted_parts)
 
     def _format_single_jira_ticket(self, jira_issue: JiraResponse) -> str:
         """
-        Format a single Jira ticket using the validated Pydantic model with improved readability.
-        
+        Format a single Jira ticket using the validated Pydantic model
+        with improved readability.
+
         Args:
             jira_issue: Validated JiraResponse instance
-            
+
         Returns:
-            Formatted string for a single ticket with proper structure and spacing
+            Formatted string for a single ticket with proper structure
+            and spacing
         """
         # Create a formatted ticket card with clear sections
         formatted_lines = []
-        
+
         # Header with ticket key and summary
         formatted_lines.append(f"## 🎫 {jira_issue.key}: {jira_issue.summary}")
         formatted_lines.append("")  # Empty line for spacing
-        
+
         # Status and Priority section
-        status_category = f" ({jira_issue.status.category})" if jira_issue.status.category else ""
+        status_category = (
+            f" ({jira_issue.status.category})" if jira_issue.status.category else ""
+        )
         formatted_lines.append(f"**📊 Status & Priority:**")
-        formatted_lines.append(f"   • Status: `{jira_issue.status.name}`{status_category}")
+        formatted_lines.append(
+            f"   • Status: `{jira_issue.status.name}`{status_category}"
+        )
         formatted_lines.append(f"   • Priority: `{jira_issue.priority.name}`")
-        
+
         # Add issue type if available
-        if hasattr(jira_issue, 'issue_type') and jira_issue.issue_type:
-            issue_type = jira_issue.issue_type.get('name', 'Unknown') if isinstance(jira_issue.issue_type, dict) else str(jira_issue.issue_type)
+        if hasattr(jira_issue, "issue_type") and jira_issue.issue_type:
+            issue_type = (
+                jira_issue.issue_type.get("name", "Unknown")
+                if isinstance(jira_issue.issue_type, dict)
+                else str(jira_issue.issue_type)
+            )
             formatted_lines.append(f"   • Type: `{issue_type}`")
-        
+
         formatted_lines.append("")  # Empty line for spacing
-        
+
         # People section
-        assignee_name = jira_issue.assignee.display_name if jira_issue.assignee else "Unassigned"
+        assignee_name = (
+            jira_issue.assignee.display_name if jira_issue.assignee else "Unassigned"
+        )
         reporter_name = jira_issue.reporter.display_name
         formatted_lines.append(f"**👥 People:**")
         formatted_lines.append(f"   • Assignee: {assignee_name}")
         formatted_lines.append(f"   • Reporter: {reporter_name}")
         formatted_lines.append("")  # Empty line for spacing
-        
+
         # Dates section
-        created_date = jira_issue.created[:10] if len(jira_issue.created) >= 10 else jira_issue.created
-        updated_date = jira_issue.updated[:10] if len(jira_issue.updated) >= 10 else jira_issue.updated
+        created_date = (
+            jira_issue.created[:10]
+            if len(jira_issue.created) >= 10
+            else jira_issue.created
+        )
+        updated_date = (
+            jira_issue.updated[:10]
+            if len(jira_issue.updated) >= 10
+            else jira_issue.updated
+        )
         formatted_lines.append(f"**📅 Timeline:**")
         formatted_lines.append(f"   • Created: {created_date}")
         formatted_lines.append(f"   • Updated: {updated_date}")
-        
+
         # Add due date if available
-        if hasattr(jira_issue, 'due_date') and jira_issue.due_date:
-            due_date = jira_issue.due_date[:10] if len(jira_issue.due_date) >= 10 else jira_issue.due_date
+        if hasattr(jira_issue, "due_date") and jira_issue.due_date:
+            due_date = (
+                jira_issue.due_date[:10]
+                if len(jira_issue.due_date) >= 10
+                else jira_issue.due_date
+            )
             formatted_lines.append(f"   • Due Date: {due_date}")
-        
+
         formatted_lines.append("")  # Empty line for spacing
-        
+
         # Labels section (only if labels exist)
         if jira_issue.labels:
             labels_str = ", ".join([f"`{label}`" for label in jira_issue.labels])
             formatted_lines.append(f"**🏷️ Labels:** {labels_str}")
             formatted_lines.append("")  # Empty line for spacing
-        
+
         # Additional metadata section
         additional_items = []
-        
+
         # Add story points if available
-        if hasattr(jira_issue, 'story_points') and jira_issue.story_points:
+        if hasattr(jira_issue, "story_points") and jira_issue.story_points:
             additional_items.append(f"Story Points: {jira_issue.story_points}")
-        
+
         # Add epic information if available
-        if hasattr(jira_issue, 'epic_link') and jira_issue.epic_link:
+        if hasattr(jira_issue, "epic_link") and jira_issue.epic_link:
             additional_items.append(f"Epic: {jira_issue.epic_link}")
-        
+
         # Add resolution information if resolved
-        if hasattr(jira_issue, 'resolution') and jira_issue.resolution:
-            resolution_name = jira_issue.resolution.get('name', 'Resolved') if isinstance(jira_issue.resolution, dict) else str(jira_issue.resolution)
+        if hasattr(jira_issue, "resolution") and jira_issue.resolution:
+            resolution_name = (
+                jira_issue.resolution.get("name", "Resolved")
+                if isinstance(jira_issue.resolution, dict)
+                else str(jira_issue.resolution)
+            )
             additional_items.append(f"Resolution: {resolution_name}")
-        
+
         if additional_items:
             formatted_lines.append(f"**📊 Additional Info:**")
             for item in additional_items:
                 formatted_lines.append(f"   • {item}")
             formatted_lines.append("")  # Empty line for spacing
-        
+
         # Description section
         description = jira_issue.description or "No description provided"
-        
+
         # Clean up description formatting and handle length
         description = " ".join(description.split())  # Remove excessive whitespace
-        
+
         formatted_lines.append(f"**📝 Description:**")
-        
+
         # Handle long descriptions by breaking them into readable chunks
         if len(description) > 500:
             # Split into sentences and group them
-            sentences = description.split('. ')
+            sentences = description.split(". ")
             current_chunk = ""
-            
+
             for sentence in sentences:
                 if len(current_chunk + sentence) < 200:
                     current_chunk += sentence + ". "
@@ -587,11 +659,11 @@ class SearchAgent:
                         formatted_lines.append(f"   {current_chunk.strip()}")
                         formatted_lines.append("")
                     current_chunk = sentence + ". "
-            
+
             # Add remaining chunk
             if current_chunk:
                 formatted_lines.append(f"   {current_chunk.strip()}")
-            
+
             # Add truncation notice if still too long
             if len(description) > 800:
                 formatted_lines.append("   ...")
@@ -599,11 +671,11 @@ class SearchAgent:
         else:
             # For shorter descriptions, just add them directly
             formatted_lines.append(f"   {description}")
-        
+
         formatted_lines.append("")  # Empty line for spacing
         formatted_lines.append("---")  # Separator line
         formatted_lines.append("")  # Empty line for spacing
-        
+
         return "\n".join(formatted_lines)
 
     def _format_jira_search_results(self, results: List[Dict]) -> str:
@@ -622,17 +694,21 @@ class SearchAgent:
             status = fields.get("status", {}).get("name", "Unknown")
             priority = fields.get("priority", {}).get("name", "Unknown")
             assignee = fields.get("assignee")
-            assignee_name = assignee.get("displayName", "Unassigned") if assignee else "Unassigned"
+            assignee_name = (
+                assignee.get("displayName", "Unassigned") if assignee else "Unassigned"
+            )
             updated = fields.get("updated", "")[:10] if fields.get("updated") else ""
 
             # Create a card-like format for each issue
             formatted_parts.append(f"## {i}. 🎫 {key}: {summary}")
             formatted_parts.append("")
-            formatted_parts.append(f"**Status:** `{status}` | **Priority:** `{priority}` | **Assignee:** {assignee_name}")
-            
+            formatted_parts.append(
+                f"**Status:** `{status}` | **Priority:** `{priority}` | **Assignee:** {assignee_name}"
+            )
+
             if updated:
                 formatted_parts.append(f"**Last Updated:** {updated}")
-            
+
             formatted_parts.append("")
             formatted_parts.append("---")
             formatted_parts.append("")
@@ -668,7 +744,9 @@ class SearchAgent:
         else:
             return "format"
 
-    async def search(self, query: str, conversation_history: List[BaseMessage] = None) -> Dict:
+    async def search(
+        self, query: str, conversation_history: List[BaseMessage] = None
+    ) -> Dict:
         """
         Perform a search based on the query
 
@@ -686,7 +764,7 @@ class SearchAgent:
             extracted_entities={},
             search_results=None,
             formatted_response=None,
-            error_message=None
+            error_message=None,
         )
 
         final_state = await self.graph.ainvoke(initial_state)
@@ -721,5 +799,5 @@ if __name__ == "__main__":
 
             if result.get("error_message"):
                 print(f"Error: {result.get('error_message')}")
-    
+
     asyncio.run(main())
