@@ -19,7 +19,7 @@ from logger import setup_logger
 
 logger = setup_logger(__name__)
 
-filename = 'BP_Service_Order_Orchestration_Technical_Guide_24-08'
+filename = 'YOUR_FILE_NAME'
 
 
 def extract_data():
