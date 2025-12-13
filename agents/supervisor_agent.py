@@ -4,9 +4,8 @@ Supervisor Agent
 Has only two main responsibilities:
 1. Route to coding agent for code generation tasks
 2. Route to search agent for all search operations
+3. Support general chit chat
 """
-
-import os
 import re
 from typing import Dict, List, Optional, TypedDict, Annotated
 from enum import Enum
@@ -14,7 +13,6 @@ from enum import Enum
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from framework_base.llm_base import LLMFactory
-from dotenv import load_dotenv
 from settings import settings
 
 # Import agents
@@ -22,11 +20,10 @@ from .search_agent import SearchAgent
 from .coding_agent import CodingAgent
 from .question_enhancer_agent import enhance_question
 
-load_dotenv()
-
 
 class TaskType(Enum):
     """Types of tasks the supervisor can handle"""
+
     CODE_GENERATION = "code_generation"
     SEARCH_OPERATION = "search_operation"
     GENERAL_CHAT = "general_chat"
@@ -34,6 +31,7 @@ class TaskType(Enum):
 
 class SupervisorState(TypedDict):
     """Simplified state for the supervisor agent"""
+
     messages: Annotated[List[BaseMessage], "Conversation messages"]
     user_input: str
     enhanced_question: Optional[str]
@@ -51,11 +49,19 @@ class SupervisorState(TypedDict):
 class SupervisorAgent:
     def __init__(self):
         """Initialize the supervisor agent"""
+        # Prepare kwargs for LLM creation
+        llm_kwargs = {"temperature": 0.3}
+
+        # Add base_url for ollama if provider is ollama
+        if settings.llm_provider.lower() == "ollama"\
+                and settings.ollama_base_url:
+            llm_kwargs["base_url"] = settings.ollama_base_url
+
         self.llm = LLMFactory.create_llm(
-            provider="litellm",
-            model_name="gpt-5-mini",
-            model_type="chat",
-            temperature=0.3
+            provider=settings.llm_provider,
+            model_name=settings.llm_model_name,
+            model_type=settings.llm_model_type,
+            **llm_kwargs,
         )
 
         # Initialize sub-agents
@@ -67,13 +73,13 @@ class SupervisorAgent:
             self.coding_agent = CodingAgent(
                 gitlab_project_id=settings.gitlab_project_id,
                 development_rules_path=settings.development_rules_path,
-                development_rules_branch=settings.development_rules_branch
+                development_rules_branch=settings.development_rules_branch,
             )
 
         # Build the workflow graph
         self.graph = self._build_graph()
 
-    def _build_graph(self) -> StateGraph:
+    def _build_graph(self):
         """Build the supervisor workflow graph"""
         workflow = StateGraph(SupervisorState)
 
@@ -101,18 +107,15 @@ class SupervisorAgent:
                 "search": "invoke_search_agent",
                 "coding": "invoke_coding_agent",
                 "general_chat": "handle_general_chat",
-                "error": "handle_error"
-            }
+                "error": "handle_error",
+            },
         )
 
         # Routes from agents
         workflow.add_conditional_edges(
             "invoke_search_agent",
             self._route_after_search,
-            {
-                "finalize": "finalize_response",
-                "error": "handle_error"
-            }
+            {"finalize": "finalize_response", "error": "handle_error"},
         )
 
         workflow.add_conditional_edges(
@@ -121,14 +124,16 @@ class SupervisorAgent:
             {
                 "finalize": "finalize_response",
                 "request_input": "request_user_input",
-                "error": "handle_error"
-            }
+                "error": "handle_error",
+            },
         )
 
         # Simple routes to end
         workflow.add_edge("handle_general_chat", "finalize_response")
         workflow.add_edge("finalize_response", END)
-        workflow.add_edge("request_user_input", END)  # TODO change this. Should not end here.
+        workflow.add_edge(
+            "request_user_input", END
+        )  # TODO change this. Should not end here.
         workflow.add_edge("handle_error", END)
 
         return workflow.compile()
@@ -146,7 +151,9 @@ class SupervisorAgent:
         except Exception as e:
             # If enhancement fails, continue with original question
             state["enhanced_question"] = state["user_input"]
-            state["error_message"] = f"Question enhancement failed, using original: {str(e)}"
+            state["error_message"] = (
+                f"Question enhancement failed, using original: {str(e)}"
+            )
 
         return state
 
@@ -172,7 +179,7 @@ class SupervisorAgent:
 
     def _extract_jira_tickets(self, text: str) -> List[str]:
         """Extract Jira ticket references from text"""
-        jira_pattern = r'\b[A-Z]+-\d+\b'
+        jira_pattern = r"\b[A-Z]+-\d+\b"
         return re.findall(jira_pattern, text)
 
     def _classify_task_simple(self, user_input: str, jira_tickets: List[str]) -> tuple:
@@ -181,9 +188,19 @@ class SupervisorAgent:
 
         # Code generation keywords and patterns
         code_generation_keywords = [
-            "generate code", "write code", "implement", "develop", "coding",
-            "create code", "build", "code for", "implement feature",
-            "development", "programming", "write function", "create class"
+            "generate code",
+            "write code",
+            "implement",
+            "develop",
+            "coding",
+            "create code",
+            "build",
+            "code for",
+            "implement feature",
+            "development",
+            "programming",
+            "write function",
+            "create class",
         ]
 
         # Check for code generation intent
@@ -191,14 +208,25 @@ class SupervisorAgent:
             return TaskType.CODE_GENERATION, 0.9
 
         # If Jira ticket is mentioned with code-related context
-        if jira_tickets and any(keyword in user_input_lower for keyword in 
-                              ["code", "implement", "develop", "build", "create"]):
+        if jira_tickets and any(
+            keyword in user_input_lower
+            for keyword in ["code", "implement", "develop", "build", "create"]
+        ):
             return TaskType.CODE_GENERATION, 0.8
 
         # Search operation keywords
         search_keywords = [
-            "search", "find", "look for", "show me", "get", "fetch",
-            "display", "list", "what is", "tell me about", "information about"
+            "search",
+            "find",
+            "look for",
+            "show me",
+            "get",
+            "fetch",
+            "display",
+            "list",
+            "what is",
+            "tell me about",
+            "information about",
         ]
 
         # Check for search intent
@@ -210,8 +238,18 @@ class SupervisorAgent:
             return TaskType.SEARCH_OPERATION, 0.7
 
         # Confluence/Jira specific terms indicate search
-        if any(keyword in user_input_lower for keyword in 
-              ["confluence", "jira", "ticket", "issue", "documentation", "wiki", "page"]):
+        if any(
+            keyword in user_input_lower
+            for keyword in [
+                "confluence",
+                "jira",
+                "ticket",
+                "issue",
+                "documentation",
+                "wiki",
+                "page",
+            ]
+        ):
             return TaskType.SEARCH_OPERATION, 0.7
 
         # Default to general chat
@@ -226,7 +264,7 @@ class SupervisorAgent:
             # Call the search agent with enhanced question (now async)
             search_result = await self.search_agent.search(
                 query=state["enhanced_question"] or state["user_input"],
-                conversation_history=conversation_history
+                conversation_history=conversation_history,
             )
 
             state["search_agent_result"] = search_result
@@ -237,7 +275,9 @@ class SupervisorAgent:
             elif search_result.get("error_message"):
                 state["error_message"] = search_result["error_message"]
             else:
-                state["final_response"] = "Search completed but no results were formatted."
+                state["final_response"] = (
+                    "Search completed but no results were formatted."
+                )
 
         except Exception as e:
             state["error_message"] = f"Error invoking search agent: {str(e)}"
@@ -248,7 +288,9 @@ class SupervisorAgent:
         """Invoke the coding agent for code generation"""
         try:
             if not self.coding_agent:
-                state["error_message"] = "Coding agent not available. Please configure OPENAI_API_KEY and GITLAB_PROJECT_ID environment variables."
+                state["error_message"] = (
+                    "Coding agent not available. Please configure OPENAI_API_KEY and GITLAB_PROJECT_ID environment variables."
+                )
                 return state
 
             # Get Jira ticket key
@@ -258,7 +300,9 @@ class SupervisorAgent:
                 # Ask user for Jira ticket key
                 state["requires_user_input"] = True
                 state["pending_action"] = "get_jira_ticket_key"
-                state["final_response"] = """To generate code, I need a Jira ticket reference. 
+                state[
+                    "final_response"
+                ] = """To generate code, I need a Jira ticket reference. 
 
                     Please provide the Jira ticket key (e.g., PROJ-123, DEV-456) that contains the requirements for code generation."""
                 return state
@@ -268,8 +312,7 @@ class SupervisorAgent:
 
             # Run the coding agent with enhanced question context (now properly awaited)
             coding_result = await self.coding_agent.run(
-                jira_ticket_key=jira_key,
-                enhanced_context=state["enhanced_question"]
+                jira_ticket_key=jira_key, enhanced_context=state["enhanced_question"]
             )
             state["coding_agent_result"] = coding_result
 
@@ -279,7 +322,9 @@ class SupervisorAgent:
             elif coding_result.get("user_input_required"):
                 state["requires_user_input"] = True
                 state["pending_action"] = "provide_confluence_link"
-                state["final_response"] = """The coding agent needs additional information.
+                state[
+                    "final_response"
+                ] = """The coding agent needs additional information.
 
 Please provide the Confluence design document link that contains the detailed requirements for this ticket."""
             else:
@@ -355,7 +400,7 @@ Please provide the Confluence design document link that contains the detailed re
         if messages:
             formatted += "### 📋 Process Status:\n\n"
             for msg in messages:
-                if hasattr(msg, 'content'):
+                if hasattr(msg, "content"):
                     # Clean up the message content and add proper bullet points
                     content = msg.content.strip()
                     if content:
@@ -371,7 +416,9 @@ Please provide the Confluence design document link that contains the detailed re
         if generated_code:
             formatted += "### 💻 Generated Code:\n\n"
             # Show a preview of the generated code
-            code_preview = generated_code[:800] if len(generated_code) > 800 else generated_code
+            code_preview = (
+                generated_code[:800] if len(generated_code) > 800 else generated_code
+            )
             formatted += f"```python\n{code_preview}"
             if len(generated_code) > 800:
                 formatted += "\n\n# ... (code truncated for display)"
@@ -381,7 +428,9 @@ Please provide the Confluence design document link that contains the detailed re
         formatted += "### ✨ Summary:\n\n"
         formatted += "Code generation workflow completed successfully. "
         if branch_name:
-            formatted += f"The generated code has been committed to the `{branch_name}` branch."
+            formatted += (
+                f"The generated code has been committed to the `{branch_name}` branch."
+            )
         else:
             formatted += "The code is ready for deployment."
 
@@ -419,7 +468,11 @@ Please provide the Confluence design document link that contains the detailed re
         else:
             return "finalize"
 
-    async def run(self, user_input: str, conversation_history: List[BaseMessage] = None) -> Dict:
+    async def run(
+        self,
+        user_input: str,
+        conversation_history: List[BaseMessage] = None
+    ) -> Dict:
         """
         Run the simplified supervisor agent workflow
 
@@ -433,7 +486,7 @@ Please provide the Confluence design document link that contains the detailed re
         # Ensure we have messages for the question enhancer
         messages = conversation_history or []
         messages.append(HumanMessage(content=user_input))
-        
+
         initial_state = SupervisorState(
             messages=messages,
             user_input=user_input,
@@ -446,7 +499,7 @@ Please provide the Confluence design document link that contains the detailed re
             final_response=None,
             error_message=None,
             requires_user_input=False,
-            pending_action=None
+            pending_action=None,
         )
 
         final_state = await self.graph.ainvoke(initial_state)
@@ -463,8 +516,8 @@ if __name__ == "__main__":
         # Test different types of queries
         test_queries = [
             # "Search for API documentation",           # Search operation
-            # "Find ticket PROJ-123",                  # Search operation  
-            "Generate code for CBP-8446"             # Code generation
+            # "Find ticket PROJ-123",                  # Search operation
+            "Generate code for CBP-8446"  # Code generation
             # "Implement the feature in STORY-789",    # Code generation
             # "What can you help me with?",            # General chat
             # "Look for confluence pages about deployment"  # Search operation
@@ -486,5 +539,5 @@ if __name__ == "__main__":
 
             if result.get("error_message"):
                 print(f"Error: {result.get('error_message')}")
-    
+
     asyncio.run(main())

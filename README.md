@@ -1,43 +1,54 @@
-# Coding Agent
+# Coding Agent - Enterprise AI Assistant System
 
-An intelligent multi-agent AI assistant system designed for enterprise environments, featuring document processing, multi-modal RAG (Retrieval-Augmented Generation), and automated code generation capabilities. The system integrates with Confluence, Jira, and GitLab to provide comprehensive workflow automation and intelligent assistance.
+An intelligent multi-agent AI assistant system designed for enterprise environments, featuring document processing, multi-modal RAG (Retrieval-Augmented Generation), automated code generation, and REST API capabilities. The system integrates with Confluence, Jira, and GitLab through the Model Context Protocol (MCP) to provide comprehensive workflow automation and intelligent assistance.
 
 ## 🚀 Features
 
 ### Multi-Agent Architecture
-- **Supervisor Agent**: Intelligent task routing and orchestration
-- **Search Agent**: Advanced search across Confluence, Jira, and document repositories
-- **Coding Agent**: Automated code generation from Jira tickets and requirements
-- **Question Enhancer**: Context-aware query enhancement and optimization
+- **Supervisor Agent**: Intelligent task routing and orchestration with confidence-based classification
+- **Search Agent**: Advanced search across Confluence, Jira, and document repositories with semantic retrieval
+- **Coding Agent**: Automated code generation from Jira tickets with GitLab integration
+- **Question Enhancer**: Context-aware query enhancement for improved retrieval
+
+### REST API Service
+- **FastAPI Backend**: Production-ready REST API for supervisor agent
+- **Interactive Documentation**: Automatic OpenAPI/Swagger documentation at `/api/docs`
+- **Streaming Support**: Server-Sent Events (SSE) for real-time responses
+- **CORS Enabled**: Cross-origin support for frontend integration
+- **Docker Compose Deployment**: Complete containerized setup with all dependencies
 
 ### Document Processing & RAG
 - **Multi-modal PDF Processing**: Extract and process text, tables, and images from PDF documents
+- **Confluence Integration**: Process Confluence pages with images, tables, and hierarchical content
 - **Intelligent Summarization**: AI-powered summarization of documents, tables, and images
 - **Vector Storage**: ChromaDB-based vector storage for efficient similarity search
 - **Multi-Vector Retrieval**: Advanced retrieval system supporting text, tables, and images
+- **MongoDB Document Store**: Persistent storage for retrieved documents and metadata
 
-### Enterprise Integrations
-- **Confluence Integration**: Search, retrieve, and process Confluence pages and documentation
-- **Jira Integration**: Ticket lookup, search, and automated code generation from requirements
-- **GitLab Integration**: Automated branch creation, code commits, and merge request management
-- **MCP (Model Context Protocol)**: Extensible tool integration framework
+### Enterprise Integrations via MCP
+- **MCP (Model Context Protocol)**: Dual-transport architecture (SSE + stdio)
+- **Confluence Integration**: Search, retrieve, and process pages and documentation
+- **Jira Integration**: Ticket lookup, search, and automated workflows
+- **GitLab Integration**: Branch creation, code commits, and merge request management
+- **Extensible Architecture**: Easy addition of new MCP servers and tools
 
 ### LLM Support
-- **Ollama Integration**: Local LLM deployment with support for various models (Llama3, etc.)
-- **Amazon Q Integration**: Enterprise-grade AI assistance
-- **Bedrock Support**: AWS Bedrock integration for scalable AI services
-- **Multi-Provider Architecture**: Flexible LLM provider switching
+- **Ollama Integration**: Local LLM deployment (Llama 3, Mistral, etc.)
+- **OpenAI Integration**: GPT-4, GPT-3.5 support via LiteLLM
+- **AWS Bedrock Support**: Claude, Titan, and other Bedrock models
+- **Multi-Provider Architecture**: Flexible LLM provider switching via unified factory
 
 ## 🏗️ Architecture
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  Streamlit UI   │    │ Chat Interface  │    │ Supervisor UI   │
+│  Streamlit UI   │    │  REST API       │    │  Frontend Apps  │
+│  (Port 8501)    │    │  (Port 8000)    │    │  (HTTP Clients) │
 └─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
           │                      │                      │
           └──────────────────────┼──────────────────────┘
                                  │
-                    ┌─────────────┴─────────────┐
+                    ┌─────────────▼─────────────┐
                     │    Supervisor Agent       │
                     │  (Task Classification &   │
                     │      Routing)            │
@@ -47,9 +58,10 @@ An intelligent multi-agent AI assistant system designed for enterprise environme
                 │                │                │
     ┌───────────▼───────────┐   │   ┌───────────▼───────────┐
     │    Search Agent       │   │   │    Coding Agent       │
-    │ - Confluence Search   │   │   │ - Jira Integration    │
-    │ - Jira Lookup        │   │   │ - Code Generation     │
-    │ - Document Retrieval  │   │   │ - GitLab Integration  │
+    │ - MCP Atlassian       │   │   │ - Jira via MCP        │
+    │ - Confluence Search   │   │   │ - Code Generation     │
+    │ - Jira Lookup        │   │   │ - GitLab via MCP      │
+    │ - Vector Store RAG    │   │   │ - Branch Management   │
     └───────────────────────┘   │   └───────────────────────┘
                                 │
                     ┌───────────▼───────────┐
@@ -58,22 +70,63 @@ An intelligent multi-agent AI assistant system designed for enterprise environme
                     │ - Vector Store        │
                     │ - Document Store      │
                     │ - MCP Client          │
-                    └───────────────────────┘
+                    └───────────┬───────────┘
+                                │
+            ┌───────────────────┼───────────────────┐
+            │                   │                   │
+    ┌───────▼────────┐  ┌──────▼──────┐  ┌────────▼────────┐
+    │ MCP Atlassian  │  │ MCP GitLab  │  │    MongoDB      │
+    │ (Port 3000)    │  │ (Port 3001) │  │  (Port 27017)   │
+    └────────────────┘  └─────────────┘  └─────────────────┘
 ```
+
+### MCP Architecture
+- **Dual Transport**: SSE (production) and stdio (development)
+- **SSE Transport**: Persistent HTTP connections to MCP services
+- **stdio Transport**: On-demand Docker container execution
+- See [MCP_ARCHITECTURE.md](MCP_ARCHITECTURE.md) for detailed information
 
 ## 📋 Prerequisites
 
-- **Python 3.8+**
-- **Ollama** (for local LLM deployment)
-- **MongoDB** (for document storage)
+- **Python 3.11+**
+- **Docker & Docker Compose** (for containerized deployment)
+- **Ollama** (optional, for local LLM deployment)
+- **MongoDB** (automatically managed in Docker Compose)
 - **ChromaDB** (automatically managed)
-- **Docker** (optional, for containerized deployment)
 
 ## 🛠️ Installation
+
+### Option 1: Docker Compose (Recommended)
 
 1. **Clone the repository**
    ```bash
    git clone <repository-url>
+   cd Coding_agent
+   ```
+
+2. **Configure environment variables**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your configuration (see Configuration section below)
+   ```
+
+3. **Start all services**
+   ```bash
+   docker compose up -d
+   ```
+
+4. **Access the services**
+   - **Streamlit UI**: http://localhost:8501
+   - **REST API**: http://localhost:8000
+   - **API Docs**: http://localhost:8000/api/docs
+   - **MongoDB Express**: http://localhost:8081
+
+### Option 2: Local Development
+
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd Coding_agent
    ```
 
 2. **Install dependencies**
@@ -81,7 +134,7 @@ An intelligent multi-agent AI assistant system designed for enterprise environme
    pip install -r requirements.txt
    ```
 
-3. **Set up Ollama**
+3. **Set up Ollama (if using local LLMs)**
    ```bash
    # Install Ollama (macOS/Linux)
    curl -fsSL https://ollama.ai/install.sh | sh
@@ -97,86 +150,297 @@ An intelligent multi-agent AI assistant system designed for enterprise environme
    # Edit .env with your configuration
    ```
 
-5. **Environment Configuration**
-   ```env
-   # Confluence Configuration
-   CONFLUENCE_URL="https://your-confluence-instance.com"
-   CONFLUENCE_USERNAME="your-username"
-   CONFLUENCE_API_TOKEN="your-api-token"
-   CONFLUENCE_SSL_VERIFY="false"
-   
-   # Jira Configuration
-   JIRA_URL="https://your-jira-instance.com"
-   JIRA_PERSONAL_TOKEN="your-personal-token"
-   JIRA_SSL_VERIFY="false"
-   
-   # GitLab Configuration (for coding agent)
-   GITLAB_PROJECT_ID="your-project-id"
-   GITLAB_ACCESS_TOKEN="your-access-token"
-   
-   # MCP Configuration
-   MCP_VERY_VERBOSE="true"
+5. **Start MongoDB**
+   ```bash
+   brew services start mongodb/brew/mongodb-community
+   # or
+   sudo systemctl start mongod
    ```
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+Create a `.env` file with the following configuration:
+
+```env
+# LLM Configuration
+LLM_PROVIDER="ollama"          # Options: ollama, litellm, bedrock
+LLM_MODEL_NAME="llama3:8b"     # Model name for your provider
+LLM_MODEL_TYPE="chat"          # Usually "chat" for conversational models
+
+# Ollama Configuration (if using local Ollama)
+OLLAMA_BASE_URL="http://host.docker.internal:11434"  # For Docker
+# OLLAMA_BASE_URL="http://localhost:11434"           # For local dev
+
+# OpenAI Configuration (if using litellm with OpenAI)
+OPENAI_API_KEY="your-openai-api-key"
+
+# AWS Bedrock Configuration (if using bedrock provider)
+AWS_ACCESS_KEY_ID="your-aws-access-key"
+AWS_SECRET_ACCESS_KEY="your-aws-secret-key"
+AWS_REGION="us-east-1"
+
+# Confluence Configuration
+CONFLUENCE_URL="https://your-company.atlassian.net/wiki"
+CONFLUENCE_USERNAME="your-email@company.com"
+CONFLUENCE_API_TOKEN="your-confluence-api-token"
+CONFLUENCE_SSL_VERIFY="false"  # Set to "true" in production with valid certs
+
+# Jira Configuration
+JIRA_URL="https://your-company.atlassian.net"
+JIRA_PERSONAL_TOKEN="your-jira-personal-token"
+JIRA_SSL_VERIFY="false"        # Set to "true" in production with valid certs
+
+# GitLab Configuration
+GITLAB_PERSONAL_ACCESS_TOKEN="your-gitlab-token"
+GITLAB_API_URL="https://gitlab.example.com"
+GITLAB_PROJECT_ID="your-project-id"
+GITLAB_READ_ONLY_MODE="false"
+
+# MCP Configuration
+MCP_VERY_VERBOSE="true"        # Enable verbose logging for MCP
+
+# MCP Service URLs (for Docker Compose - SSE transport)
+MCP_ATLASSIAN_URL="http://mcp-atlassian:3000"
+MCP_GITLAB_URL="http://mcp-gitlab:3001"
+
+# MongoDB Configuration (optional, defaults work for Docker Compose)
+MONGODB_URI="mongodb://mongodb:27017"
+MONGODB_DATABASE="langchain_db"
+```
+
+### Transport Mode Selection
+
+The system automatically selects MCP transport based on configuration:
+
+- **SSE Transport** (Production): Used when `MCP_ATLASSIAN_URL` is set
+  - Persistent connections to MCP services
+  - Better performance and security
+  - Docker Compose default
+
+- **stdio Transport** (Development): Used when `MCP_ATLASSIAN_URL` is not set
+  - On-demand Docker container execution
+  - No persistent services required
+  - Local development fallback
+
+See [MCP_ARCHITECTURE.md](MCP_ARCHITECTURE.md) for detailed information.
 
 ## 🚀 Quick Start
 
-### 1. Document Processing (PDF RAG)
+### Using Docker Compose (Recommended)
 
-1. **Add your PDF documents** to the `pdf_files/` directory
-
-2. **Process documents** to create vector embeddings:
+1. **Start all services**
    ```bash
-   python pdf_loader.py
+   docker compose up -d
    ```
 
-3. **Launch the chat interface**:
+2. **Check service status**
    ```bash
-   streamlit run chat.py
+   docker compose ps
+   docker compose logs -f supervisor-api
    ```
 
-### 2. Multi-Agent Assistant
+3. **Access the interfaces**
+   - **Streamlit UI**: http://localhost:8501
+   - **REST API**: http://localhost:8000
+   - **API Interactive Docs**: http://localhost:8000/api/docs
+   - **MongoDB Express**: http://localhost:8081
 
-Launch the advanced multi-agent interface:
-```bash
-streamlit run chat_with_supervisor.py
-```
+4. **Test the API**
+   ```bash
+   # Health check
+   curl http://localhost:8000/api/health
+   
+   # Chat request
+   curl -X POST http://localhost:8000/api/supervisor/chat \
+     -H "Content-Type: application/json" \
+     -d '{"user_input":"What can you help me with?"}'
+   ```
 
-### 3. Confluence Data Loading
+### Using Local Development
 
-Process Confluence pages for enhanced search:
-```bash
-python confluence_loader_new.py
-```
+1. **Start MongoDB**
+   ```bash
+   brew services start mongodb/brew/mongodb-community
+   ```
+
+2. **Launch Streamlit UI**
+   ```bash
+   streamlit run chat_with_supervisor.py
+   ```
+   Visit http://localhost:8501
+
+3. **Or launch REST API**
+   ```bash
+   uvicorn supervisor_api:app --host 0.0.0.0 --port 8000 --reload
+   ```
+   Visit http://localhost:8000/api/docs
+
+### Document Processing (RAG Pipeline)
+
+#### Process PDF Documents
+
+1. **Add PDFs** to a directory (e.g., `old_stuff/pdf_files/`)
+
+2. **Run the PDF loader** (update file paths in script):
+   ```bash
+   python old_stuff/pdf_loader.py
+   ```
+
+#### Process Confluence Pages
+
+1. **Configure Confluence credentials** in `.env`
+
+2. **Update the loader script** with space key and page ID:
+   ```python
+   # In RAG/confluence_loader_new.py
+   CONFLUENCE_URL = "https://your-confluence.com"
+   SPACE_KEY = "YOUR_SPACE"
+   PAGE_ID = "123456"
+   ```
+
+3. **Run the loader**:
+   ```bash
+   python RAG/confluence_loader_new.py
+   ```
 
 ## 💡 Usage Examples
 
-### Document Q&A
+### Streamlit UI Examples
+
+**Search Operations:**
 ```
-User: "What are the key features of the Service Order Orchestrator?"
-AI: Based on the technical guide, the Service Order Orchestrator includes...
+User: "Find ticket PROJ-123"
+User: "Search for API documentation in Confluence"
+User: "Show me recent bugs in the DEV project"
 ```
 
-### Jira Integration
+**Code Generation:**
 ```
-User: "Show me details for ticket CBP-8446"
-AI: [Retrieves and displays Jira ticket information with context]
-```
-
-### Code Generation
-```
-User: "Generate code for implementing the feature in DEV-123"
-AI: [Analyzes Jira ticket, retrieves design docs, generates code]
+User: "Generate code for ticket CBP-8446"
+User: "Implement the feature described in DEV-789"
 ```
 
-### Confluence Search
+**General Chat:**
 ```
-User: "Find API documentation for authentication"
-AI: [Searches Confluence and returns relevant documentation]
+User: "What can you help me with?"
+User: "How do I integrate with the API?"
 ```
 
-## 🔧 Configuration
+### REST API Examples
 
-### LLM Configuration
+**Using cURL:**
+
+```bash
+# Health check
+curl http://localhost:8000/api/health
+
+# Simple chat
+curl -X POST http://localhost:8000/api/supervisor/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "Find information about PROJ-123",
+    "session_id": "my-session-1"
+  }'
+
+# Chat with history
+curl -X POST http://localhost:8000/api/supervisor/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_input": "Tell me more about it",
+    "conversation_history": [
+      {"role": "user", "content": "What is PROJ-123?"},
+      {"role": "assistant", "content": "PROJ-123 is..."}
+    ],
+    "session_id": "my-session-1"
+  }'
+```
+
+**Using Python:**
+
+```python
+import requests
+
+# Simple request
+response = requests.post(
+    "http://localhost:8000/api/supervisor/chat",
+    json={
+        "user_input": "Search for deployment documentation",
+        "session_id": "python-session"
+    }
+)
+
+result = response.json()
+print(f"Task Type: {result['task_analysis']['task_type']}")
+print(f"Response: {result['response']}")
+```
+
+**Using JavaScript/TypeScript:**
+
+```typescript
+const response = await fetch('http://localhost:8000/api/supervisor/chat', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    user_input: 'Find ticket PROJ-123',
+    session_id: 'js-session'
+  })
+});
+
+const result = await response.json();
+console.log(result.response);
+```
+
+See [SUPERVISOR_API_GUIDE.md](SUPERVISOR_API_GUIDE.md) for complete API documentation.
+
+## 📁 Project Structure
+
+```
+Coding_agent/
+├── agents/                     # Multi-agent system
+│   ├── supervisor_agent.py     # Main orchestration agent
+│   ├── search_agent.py         # Search and retrieval agent
+│   ├── coding_agent.py         # Code generation agent
+│   ├── question_enhancer_agent.py # Query enhancement
+│   ├── components/             # Modular agent components
+│   │   ├── jira_handler.py
+│   │   ├── confluence_handler.py
+│   │   ├── gitlab_handler.py
+│   │   └── code_generator.py
+│   └── models/                 # Data models and schemas
+│       └── jira_response_model.py
+├── framework_base/             # Core framework
+│   ├── llm_base.py            # LLM factory and abstractions
+│   ├── vector_store.py        # Vector storage management
+│   ├── doc_store.py           # Document storage (MongoDB)
+│   └── multi_server_mcp_client.py # MCP client with dual transport
+├── RAG/                       # RAG pipeline implementations
+│   └── confluence_loader_new.py # Confluence data loader
+├── old_stuff/                 # Legacy implementations
+│   ├── pdf_loader.py          # PDF processing pipeline
+│   └── chat.py                # Simple chat interface
+├── chroma_db/                 # ChromaDB vector storage (auto-created)
+├── logs/                      # Application logs (auto-created)
+├── chat_with_supervisor.py    # Streamlit UI application
+├── supervisor_api.py          # FastAPI REST API service
+├── settings.py                # Application settings and configuration
+├── logger.py                  # Logging configuration
+├── utils.py                   # Utility functions
+├── requirements.txt           # Python dependencies
+├── docker-compose.yml         # Docker Compose configuration
+├── dockerfile.api             # Dockerfile for API service
+├── dockerfile.streamlit       # Dockerfile for Streamlit UI
+├── README.md                  # This file
+├── SUPERVISOR_API_GUIDE.md    # Complete API documentation
+├── MCP_ARCHITECTURE.md        # MCP integration details
+└── .env.example               # Environment variables template
+```
+
+## 🔧 Advanced Configuration
+
+### LLM Configuration Examples
+
 The system supports multiple LLM providers through the `LLMFactory`:
 
 ```python
@@ -185,35 +449,45 @@ llm = LLMFactory.create_llm(
     provider="ollama",
     model_name="llama3:8b",
     model_type="chat",
-    temperature=0.7
+    temperature=0.7,
+    base_url="http://localhost:11434"
 )
 
-# Amazon Q
+# OpenAI via LiteLLM
 llm = LLMFactory.create_llm(
-    provider="amazon_q",
-    model_name="amazon-q-developer",
-    model_type="chat"
+    provider="litellm",
+    model_name="gpt-4o-mini",
+    model_type="chat",
+    temperature=0.7
 )
 
 # AWS Bedrock
 llm = LLMFactory.create_llm(
     provider="bedrock",
     model_name="anthropic.claude-3-sonnet-20240229-v1:0",
-    model_type="chat"
+    model_type="chat",
+    temperature=0.7
 )
 ```
 
 ### Vector Store Configuration
+
 ```python
+from framework_base.vector_store import get_vector_store
+
 # ChromaDB (Default)
 vectorstore = get_vector_store(
     store_type="chroma",
-    collection_name="langchain"
+    collection_name="langchain",
+    persist_directory="./chroma_db"
 )
 ```
 
 ### Document Store Configuration
+
 ```python
+from framework_base.doc_store import get_document_store
+
 # MongoDB Document Store
 doc_store = get_document_store(
     database="langchain_db",
@@ -222,83 +496,22 @@ doc_store = get_document_store(
 )
 ```
 
-## 📁 Project Structure
+## 🐳 Docker Services
 
-```
-cbp-ai-wizard/
-├── agents/                     # Multi-agent system
-│   ├── supervisor_agent.py     # Main orchestration agent
-│   ├── search_agent.py         # Search and retrieval agent
-│   ├── coding_agent.py         # Code generation agent
-│   ├── question_enhancer_agent.py
-│   ├── components/             # Modular agent components
-│   └── models/                 # Data models
-├── framework_base/             # Core framework
-│   ├── llm_base.py            # LLM factory and abstractions
-│   ├── vector_store.py        # Vector storage management
-│   ├── doc_store.py           # Document storage
-│   ├── multi_server_mcp_client.py
-│   └── amazon_q/              # Amazon Q integration
-├── pdf_files/                 # PDF documents for processing
-├── chroma_db/                 # ChromaDB storage
-├── logs/                      # Application logs
-├── chat.py                    # Simple chat interface
-├── chat_with_supervisor.py    # Advanced multi-agent interface
-├── pdf_loader.py              # PDF processing pipeline
-├── confluence_loader_new.py   # Confluence data loader
-├── utils.py                   # Utility functions
-├── logger.py                  # Logging configuration
-└── requirements.txt           # Python dependencies
-```
+The Docker Compose setup includes:
 
-## 🔍 Key Components
-
-### Multi-Vector Retrieval System
-- Processes and indexes text, tables, and images separately
-- Generates AI summaries for better semantic search
-- Supports multi-modal queries and responses
-
-### Intelligent Task Routing
-- Automatically classifies user queries
-- Routes to appropriate specialized agents
-- Maintains conversation context and history
-
-### Enterprise Integration
-- Secure authentication with enterprise systems
-- SSL/TLS support with certificate management
-- Configurable API endpoints and credentials
+| Service | Port | Description |
+|---------|------|-------------|
+| supervisor-api | 8000 | FastAPI REST API service |
+| streamlit-ui | 8501 | Streamlit web interface |
+| mcp-atlassian | 3000 | MCP server for Jira/Confluence |
+| mcp-gitlab | 3001 | MCP server for GitLab |
+| mongodb | 27017 | MongoDB document store |
+| mongo-express | 8081 | MongoDB admin interface |
 
 ## 🚨 Troubleshooting
 
-### Common Issues
-
-1. **Ollama Connection Issues**
-   ```bash
-   # Check if Ollama is running
-   ollama list
-   
-   # Restart Ollama service
-   ollama serve
-   ```
-
-2. **MongoDB Connection Issues**
-   ```bash
-   # Start MongoDB service
-   brew services start mongodb/brew/mongodb-community
-   # or
-   sudo systemctl start mongod
-   ```
-
-3. **ChromaDB Persistence Issues**
-   ```bash
-   # Clear ChromaDB if corrupted
-   rm -rf chroma_db/
-   # Re-run pdf_loader.py to rebuild
-   ```
-
-4. **SSL Certificate Issues**
-   - Set `SSL_VERIFY="false"` in environment variables for development
-   - Add custom certificates to `ca_roots.pem` for production
+See respective guides or .md files for troubleshooting tips specific to a service
 
 ## 🤝 Contributing
 
@@ -314,8 +527,20 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🙏 Acknowledgments
 
-- **LangChain** for the RAG framework
+- **LangChain** for the RAG framework and agent orchestration
+- **LangGraph** for state machine graph workflows
 - **Ollama** for local LLM deployment
 - **Streamlit** for the user interface
+- **FastAPI** for the REST API framework
 - **ChromaDB** for vector storage
 - **MongoDB** for document persistence
+- **Model Context Protocol (MCP)** for extensible tool integration
+
+## 🔗 Related Resources
+
+- [LangChain Documentation](https://python.langchain.com/)
+- [LangGraph Documentation](https://langchain-ai.github.io/langgraph/)
+- [Ollama Models](https://ollama.ai/library)
+- [MCP Servers](https://github.com/modelcontextprotocol)
+- [FastAPI Documentation](https://fastapi.tiangolo.com/)
+- [Streamlit Documentation](https://docs.streamlit.io/)
