@@ -37,10 +37,11 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field(
         default="http://localhost:11434", alias="OLLAMA_BASE_URL"
     )
-    
+
     # MCP Server URLs (for Docker Compose / SSE transport)
     mcp_atlassian_url: str = Field(default="", alias="MCP_ATLASSIAN_URL")
     mcp_gitlab_url: str = Field(default="", alias="MCP_GITLAB_URL")
+    mcp_github_url: str = Field(default="", alias="MCP_GITHUB_URL")
 
     class Config:
         env_file = ".env"
