@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     development_rules_path: str = Field(default="", alias="DEVELOPMENT_RULES_PATH")
     development_rules_branch: str = Field(default="", alias="DEVELOPMENT_RULES_BRANCH")
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
+    github_token: str = Field(default="", alias="GITHUB_TOKEN")
 
     # LLM Configuration
     llm_provider: str = Field(default="litellm", alias="LLM_PROVIDER")

@@ -1,4 +1,5 @@
 from typing import Optional, Union
+from settings import settings
 from langchain_community.llms.ollama import Ollama
 from langchain_community.llms.bedrock import Bedrock
 from langchain_community.chat_models import BedrockChat
@@ -40,15 +41,11 @@ class LLMFactory:
             if provider.lower() == "ollama":
                 if model_type.lower() == "chat":
                     return LLMFactory._create_ollama_chat(
-                        model_name=model_name,
-                        temperature=temperature,
-                        **kwargs
+                        model_name=model_name, temperature=temperature, **kwargs
                     )
                 else:
                     return LLMFactory._create_ollama(
-                        model_name=model_name,
-                        temperature=temperature,
-                        **kwargs
+                        model_name=model_name, temperature=temperature, **kwargs
                     )
 
             elif provider.lower() == "bedrock":
@@ -75,7 +72,6 @@ class LLMFactory:
                     max_tokens=max_tokens,
                     **kwargs,
                 )
-
             else:
                 raise ValueError(f"Unsupported provider: {provider}")
 
@@ -92,40 +88,37 @@ class LLMFactory:
     ) -> Union[ChatOllama, ChatOpenAI]:
         """
         Create a ChatOpenAI instance for litellm.
-        If model_name starts with 'ollama/', uses ollama.
-        Otherwise uses OpenAI directly with provided API key.
+        Supports:
+        - ollama/* for local Ollama models
+        - github/* for GitHub Copilot models
+        - Direct OpenAI models (gpt-4, gpt-3.5-turbo, etc.)
         """
-        if model_name.startswith("ollama/"):
-            # Remove ollama/ prefix and use ollama provider
-            actual_model = model_name.replace("ollama/", "")
-            base_url = kwargs.get("base_url", "http://localhost:11434")
+        # GitHub Copilot models via OpenAI-compatible API
+        actual_model = model_name.replace("github/", "")
 
-            ollama_kwargs = {
-                "model": actual_model,
-                "base_url": base_url,
-                "temperature": temperature,
-            }
-
-            # Add max_tokens if provided (ollama uses num_predict)
-            if max_tokens:
-                ollama_kwargs["num_predict"] = max_tokens
-
-            return ChatOllama(**ollama_kwargs)
-        else:
-            # Use OpenAI directly (for OpenAI or Bedrock models)
-            # Filter out ollama-specific kwargs that would break OpenAI API
-            openai_kwargs = {
-                k: v for k, v in kwargs.items()
-                if k not in ["base_url", "timeout"]
-            }
-
-            # OpenAI API now uses max_completion_tokens instead of max_tokens
-            if max_tokens:
-                openai_kwargs["max_completion_tokens"] = max_tokens
-
-            return ChatOpenAI(
-                model=model_name, temperature=temperature, **openai_kwargs
+        # Get GitHub token from environment or kwargs
+        github_token = settings.github_token
+        if not github_token:
+            raise ValueError(
+                "GITHUB_TOKEN not found. Set it in .env file or pass "
+                "as github_token kwarg."
             )
+
+        openai_kwargs = {
+            "base_url": (
+                "https://models.inference.ai.azure.com"
+            ),
+            "api_key": github_token,
+        }
+
+        # Add max_tokens if provided
+        if max_tokens:
+            openai_kwargs["max_completion_tokens"] = max_tokens
+
+        logger.info(f"Using GitHub model: {actual_model}")
+        return ChatOpenAI(
+            model=actual_model, temperature=temperature, **openai_kwargs
+        )
 
     @staticmethod
     def _create_ollama(
@@ -135,11 +128,7 @@ class LLMFactory:
         **kwargs,
     ) -> Ollama:
         """Create an Ollama completion instance"""
-        return Ollama(
-            model=model_name,
-            base_url=base_url,
-            temperature=temperature
-        )
+        return Ollama(model=model_name, base_url=base_url, temperature=temperature)
 
     @staticmethod
     def _create_ollama_chat(
@@ -149,11 +138,7 @@ class LLMFactory:
         **kwargs,
     ) -> ChatOllama:
         """Create an Ollama chat instance"""
-        return ChatOllama(
-            model=model_name,
-            base_url=base_url,
-            temperature=temperature
-        )
+        return ChatOllama(model=model_name, base_url=base_url, temperature=temperature)
 
     @staticmethod
     def _create_bedrock(
@@ -191,8 +176,7 @@ class LLMFactory:
             model_id = model_name
             # Detect if it's an anthropic model by checking the model_id
             anthropic_version = (
-                "bedrock-2023-05-31" if "anthropic"
-                in model_name.lower() else None
+                "bedrock-2023-05-31" if "anthropic" in model_name.lower() else None
             )
         region_name = kwargs.get("region_name", "us-east-1")
 
@@ -202,10 +186,7 @@ class LLMFactory:
             session_kwargs["profile_name"] = kwargs.get("profile_name")
 
         session = boto3.Session(**session_kwargs)
-        client = session.client(
-            service_name="bedrock-runtime",
-            region_name=region_name
-        )
+        client = session.client(service_name="bedrock-runtime", region_name=region_name)
 
         model_kwargs = {
             "temperature": temperature,
@@ -217,13 +198,7 @@ class LLMFactory:
 
         if anthropic_version and model_type == "chat":
             return BedrockChat(
-                client=client,
-                model_id=model_id,
-                model_kwargs=model_kwargs
+                client=client, model_id=model_id, model_kwargs=model_kwargs
             )
         else:
-            return Bedrock(
-                client=client,
-                model_id=model_id,
-                model_kwargs=model_kwargs
-            )
+            return Bedrock(client=client, model_id=model_id, model_kwargs=model_kwargs)
