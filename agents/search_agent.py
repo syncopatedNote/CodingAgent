@@ -12,13 +12,13 @@ from typing import Dict, List, Optional, TypedDict, Annotated
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import (
     HumanMessage,
-    AIMessage,
     BaseMessage,
+    AIMessage,
     ToolMessage,
 )
 from langchain_mcp_adapters.tools import load_mcp_tools
 from framework_base.llm_base import LLMFactory
-from framework_base.multi_server_mcp_client import multi_server_mcp_client
+from framework_base.multi_server_mcp_client import get_read_only_tools
 from settings import settings
 from logger import setup_logger
 
@@ -75,12 +75,11 @@ class SearchAgent:
         return workflow.compile()
 
     async def _load_mcp_tools(self):
-        """Load all available MCP tools from Atlassian server"""
+        """Load MCP tools filtered for search operations using readOnlyHint"""
         try:
-            async with multi_server_mcp_client.session("github") as session:
-                tools = await load_mcp_tools(session)
-                logger.info(f"Loaded {len(tools)} MCP tools for search agent")
-                return tools
+            tools = await get_read_only_tools()
+            logger.info(f"Loaded {len(tools)} read-only search tools")
+            return tools
         except Exception as e:
             logger.error(f"Failed to load MCP tools: {str(e)}")
             return []
@@ -96,7 +95,7 @@ class SearchAgent:
 
             if not tools:
                 state["error_message"] = (
-                    "No MCP tools available. Please check MCP server connection."
+                    "No MCP tools available. Please check MCP server" "connection."
                 )
                 return state
 
@@ -104,8 +103,10 @@ class SearchAgent:
             llm_with_tools = self.llm.bind_tools(tools)
 
             # Build the prompt for the LLM
+            tool_names = [t.name for t in tools]
             search_prompt = f"""
-                You are a search assistant with access to Confluence and Jira tools.
+                You are a search assistant with access to various read-only
+                tools for GitHub, Confluence, and Jira.
                 User Query: {state['query']}
 
                 Your task:
@@ -113,16 +114,25 @@ class SearchAgent:
                 2. Use the appropriate tools to find the information
                 3. You can call multiple tools if needed
 
-                Available tool capabilities:
-                - confluence_search: Search Confluence pages/documentation
-                - jira_get_issue: Get details of a specific Jira ticket (use
-                  when ticket ID mentioned like PROJ-123)
+                Available tools: {', '.join(tool_names)}
 
-                Think about what the user needs and call the appropriate tool(s).
+                Think about what the user needs and call the
+                appropriate tool(s).
             """
 
+            # Filter out ToolMessages and AIMessages with tool_calls from history
+            # to avoid OpenAI API errors about orphaned tool messages
+            clean_history = [
+                msg
+                for msg in state["messages"]
+                if not isinstance(msg, ToolMessage)
+                and not (
+                    isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None)
+                )
+            ]
+
             # Add the search prompt to messages
-            messages = state["messages"] + [HumanMessage(content=search_prompt)]
+            messages = clean_history + [HumanMessage(content=search_prompt)]
 
             # Let LLM make tool calls
             response = await llm_with_tools.ainvoke(messages)
@@ -130,6 +140,10 @@ class SearchAgent:
             # Check if LLM made tool calls
             if hasattr(response, "tool_calls") and response.tool_calls:
                 logger.info(f"LLM made {len(response.tool_calls)} tool call(s)")
+
+                # Add the AI response (with tool_calls) to messages BEFORE ToolMessages
+                messages.append(response)
+
                 tool_results = []
 
                 # Execute each tool call

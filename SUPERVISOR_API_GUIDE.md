@@ -276,11 +276,11 @@ export class SupervisorClient {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
     });
-    
+
     if (!response.ok) {
       throw new Error(`API error: ${response.statusText}`);
     }
-    
+
     return response.json();
   }
 
@@ -314,18 +314,18 @@ export function useSupervisor() {
   const chat = async (userInput: string, sessionId?: string) => {
     setLoading(true);
     setError(null);
-    
+
     try {
       const response = await fetch('http://localhost:8000/api/supervisor/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_input: userInput, session_id: sessionId }),
       });
-      
+
       if (!response.ok) {
         throw new Error(`API error: ${response.statusText}`);
       }
-      
+
       return await response.json();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -368,7 +368,7 @@ from typing import Optional, List, Dict, Any
 class SupervisorClient:
     def __init__(self, base_url: str = "http://localhost:8000"):
         self.base_url = base_url
-        
+
     def chat(
         self,
         user_input: str,
@@ -387,7 +387,7 @@ class SupervisorClient:
         )
         response.raise_for_status()
         return response.json()
-    
+
     def health(self) -> Dict[str, Any]:
         """Check API health status."""
         response = requests.get(f"{self.base_url}/api/health")

@@ -23,22 +23,26 @@ class JiraHandler:
 
             async with multi_server_mcp_client.session("atlassian") as session:
                 tools = await load_mcp_tools(session)
-                jira_tool = next((tool for tool in tools if "jira_get_issue" in tool.name), None)
+                jira_tool = next(
+                    (tool for tool in tools if "jira_get_issue" in tool.name), None
+                )
 
                 if not jira_tool:
                     return Command(
                         goto="handle_error",
                         update={
                             "error_message": "Jira get issue tool not available",
-                            "workflow_status": "error"
-                        }
+                            "workflow_status": "error",
+                        },
                     )
 
-                ticket_data = await jira_tool.ainvoke({
-                    "issue_key": ticket_key,
-                    "fields": "summary,description,comment",
-                    "comment_limit": 50
-                })
+                ticket_data = await jira_tool.ainvoke(
+                    {
+                        "issue_key": ticket_key,
+                        "fields": "summary,description,comment",
+                        "comment_limit": 50,
+                    }
+                )
 
                 if ticket_data:
                     if isinstance(ticket_data, str):
@@ -49,18 +53,21 @@ class JiraHandler:
                         update={
                             "jira_ticket_data": ticket_data,
                             "workflow_status": "jira_fetched",
-                            "messages": state["messages"] + [
-                                AIMessage(content=f"Successfully fetched Jira ticket: {ticket_key}")
-                            ]
-                        }
+                            "messages": state["messages"]
+                            + [
+                                AIMessage(
+                                    content=f"Successfully fetched Jira ticket: {ticket_key}"
+                                )
+                            ],
+                        },
                     )
                 else:
                     return Command(
                         goto="handle_error",
                         update={
                             "error_message": f"Failed to fetch Jira ticket: {ticket_key}",
-                            "workflow_status": "error"
-                        }
+                            "workflow_status": "error",
+                        },
                     )
 
         except Exception as e:
@@ -68,8 +75,8 @@ class JiraHandler:
                 goto="handle_error",
                 update={
                     "error_message": f"Error fetching Jira ticket: {str(e)}",
-                    "workflow_status": "error"
-                }
+                    "workflow_status": "error",
+                },
             )
 
     @staticmethod
@@ -80,5 +87,5 @@ class JiraHandler:
 
         return {
             "summary": fields.get("summary", "summary not available"),
-            "description": fields.get("description", "description not available")
+            "description": fields.get("description", "description not available"),
         }

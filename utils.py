@@ -6,6 +6,7 @@ import pymupdf
 from tqdm import tqdm
 import base64
 from IPython.display import Image, display
+
 # from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 logger = setup_logger(__name__)
@@ -13,11 +14,11 @@ logger = setup_logger(__name__)
 
 def extract_tables_from_pdf(
     file_path: str,
-    pages: Optional[str] = 'all',
+    pages: Optional[str] = "all",
     output_format: str = None,
     guess: bool = True,
     lattice: bool = True,
-    stream: bool = True
+    stream: bool = True,
 ) -> pd.DataFrame:
     """
     Extract tables from the PDF file.
@@ -45,7 +46,7 @@ def extract_tables_from_pdf(
             output_format=output_format,
             lattice=lattice,
             stream=stream,
-            multiple_tables=True
+            multiple_tables=True,
         )
 
         logger.info(f"Successfully extracted {len(tables)} tables")
@@ -56,9 +57,7 @@ def extract_tables_from_pdf(
         raise
 
 
-def extract_images_from_pdf(
-        filepath: str = None
-) -> list:
+def extract_images_from_pdf(filepath: str = None) -> list:
     images = []
     doc = pymupdf.open(filepath)
     num_pages = len(doc)
@@ -78,7 +77,7 @@ def process_images(doc, page) -> list:
         # Convert to PNG bytes in memory
         png_bytes = pix.tobytes("png")
         # Convert bytes to base64 string
-        encoded_image = base64.b64encode(png_bytes).decode('utf-8')
+        encoded_image = base64.b64encode(png_bytes).decode("utf-8")
         data.append(encoded_image)
     return data
 
@@ -115,10 +114,8 @@ def display_base64_image(base64_code):
 
 #     return extracted_text_chunks
 
-def extract_text_from_pdf(
-        filepath: str = None,
-        pages: Optional[str] = 'all'
-) -> list:
+
+def extract_text_from_pdf(filepath: str = None, pages: Optional[str] = "all") -> list:
     doc = pymupdf.open(filepath)
     num_pages = len(doc)
     text = []

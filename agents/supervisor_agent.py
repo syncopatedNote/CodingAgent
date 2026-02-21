@@ -53,8 +53,7 @@ class SupervisorAgent:
         llm_kwargs = {"temperature": 0.3}
 
         # Add base_url for ollama if provider is ollama
-        if settings.llm_provider.lower() == "ollama"\
-                and settings.ollama_base_url:
+        if settings.llm_provider.lower() == "ollama" and settings.ollama_base_url:
             llm_kwargs["base_url"] = settings.ollama_base_url
 
         self.llm = LLMFactory.create_llm(
@@ -222,19 +221,19 @@ class SupervisorAgent:
             task_type = TaskType.GENERAL_CHAT  # default
             confidence = 0.5  # default
 
-            for line in result.split('\n'):
+            for line in result.split("\n"):
                 line = line.strip()
-                if line.startswith('CATEGORY:'):
-                    category = line.split(':', 1)[1].strip()
-                    if 'CODE_GENERATION' in category:
+                if line.startswith("CATEGORY:"):
+                    category = line.split(":", 1)[1].strip()
+                    if "CODE_GENERATION" in category:
                         task_type = TaskType.CODE_GENERATION
-                    elif 'SEARCH_OPERATION' in category:
+                    elif "SEARCH_OPERATION" in category:
                         task_type = TaskType.SEARCH_OPERATION
-                    elif 'GENERAL_CHAT' in category:
+                    elif "GENERAL_CHAT" in category:
                         task_type = TaskType.GENERAL_CHAT
-                elif line.startswith('CONFIDENCE:'):
+                elif line.startswith("CONFIDENCE:"):
                     try:
-                        confidence = float(line.split(':', 1)[1].strip())
+                        confidence = float(line.split(":", 1)[1].strip())
                     except ValueError:
                         confidence = 0.7  # fallback
 
@@ -260,8 +259,8 @@ class SupervisorAgent:
             state["search_agent_result"] = search_result
 
             # Set the final response from search results
-            if search_result.get("formatted_response"):
-                state["final_response"] = search_result["formatted_response"]
+            if search_result.get("final_response"):
+                state["final_response"] = search_result["final_response"]
             elif search_result.get("error_message"):
                 state["error_message"] = search_result["error_message"]
             else:
@@ -292,7 +291,7 @@ class SupervisorAgent:
                 state["pending_action"] = "get_jira_ticket_key"
                 state[
                     "final_response"
-                ] = """To generate code, I need a Jira ticket reference. 
+                ] = """To generate code, I need a Jira ticket reference.
 
                     Please provide the Jira ticket key (e.g., PROJ-123, DEV-456) that contains the requirements for code generation."""
                 return state
@@ -459,9 +458,7 @@ Please provide the Confluence design document link that contains the detailed re
             return "finalize"
 
     async def run(
-        self,
-        user_input: str,
-        conversation_history: List[BaseMessage] = None
+        self, user_input: str, conversation_history: List[BaseMessage] = None
     ) -> Dict:
         """
         Run the simplified supervisor agent workflow

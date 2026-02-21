@@ -15,7 +15,7 @@ from .jira_response_model import (
 
 __all__ = [
     "JiraResponse",
-    "JiraSearchResponse", 
+    "JiraSearchResponse",
     "JiraErrorResponse",
     "JiraStatus",
     "JiraPriority",

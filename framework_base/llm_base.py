@@ -105,9 +105,7 @@ class LLMFactory:
             )
 
         openai_kwargs = {
-            "base_url": (
-                "https://models.inference.ai.azure.com"
-            ),
+            "base_url": ("https://models.inference.ai.azure.com"),
             "api_key": github_token,
         }
 
@@ -116,9 +114,7 @@ class LLMFactory:
             openai_kwargs["max_completion_tokens"] = max_tokens
 
         logger.info(f"Using GitHub model: {actual_model}")
-        return ChatOpenAI(
-            model=actual_model, temperature=temperature, **openai_kwargs
-        )
+        return ChatOpenAI(model=actual_model, temperature=temperature, **openai_kwargs)
 
     @staticmethod
     def _create_ollama(

@@ -24,16 +24,20 @@ class CodeGenerator:
             ticket_data = state["jira_ticket_data"]
             design_content = state["confluence_design_content"]
             dev_rules = state["development_rules"]
-            
+
             # Get current iteration count
             reflection_count = state.get("reflection_count", 0)
             previous_feedback = state.get("reflection_feedback", "")
 
-            ticket_summary = ticket_data.get("fields", {}).get("summary", "summary not available")
-            ticket_description = ticket_data.get("fields", {}).get("description", "description not available")
+            ticket_summary = ticket_data.get("fields", {}).get(
+                "summary", "summary not available"
+            )
+            ticket_description = ticket_data.get("fields", {}).get(
+                "description", "description not available"
+            )
 
             enhanced_context_section = ""
-            if state.get('enhanced_context'):
+            if state.get("enhanced_context"):
                 enhanced_context_section = f"""
                     ENHANCED CONTEXT:
                     {state['enhanced_context']}
@@ -46,7 +50,7 @@ class CodeGenerator:
                 feedback_section = f"""
                     PREVIOUS REFLECTION FEEDBACK (Iteration {reflection_count}):
                     {previous_feedback}
-                    
+
                     Please address all the feedback points in your improved code generation.
                 """
 
@@ -74,11 +78,15 @@ class CodeGenerator:
                 Provide the code with clear file structure and explanations.
                 """
 
-            user_message = "Generate the code for this requirement." if reflection_count == 0 else "Improve the code based on the reflection feedback."
+            user_message = (
+                "Generate the code for this requirement."
+                if reflection_count == 0
+                else "Improve the code based on the reflection feedback."
+            )
 
             messages = [
                 SystemMessage(content=system_prompt),
-                HumanMessage(content=user_message)
+                HumanMessage(content=user_message),
             ]
 
             response = self.llm.invoke(messages)
@@ -94,10 +102,13 @@ class CodeGenerator:
                     "generated_code": generated_code,
                     "reflection_count": reflection_count,
                     "workflow_status": f"code_generated_iteration_{reflection_count + 1}",
-                    "messages": state["messages"] + [
-                        AIMessage(content=f"Successfully {'generated' if reflection_count == 0 else 'improved'} code (iteration {reflection_count + 1})")
-                    ]
-                }
+                    "messages": state["messages"]
+                    + [
+                        AIMessage(
+                            content=f"Successfully {'generated' if reflection_count == 0 else 'improved'} code (iteration {reflection_count + 1})"
+                        )
+                    ],
+                },
             )
 
         except Exception as e:
@@ -106,25 +117,28 @@ class CodeGenerator:
                 goto="handle_error",
                 update={
                     "error_message": f"Error generating code: {str(e)}",
-                    "workflow_status": "error"
-                }
+                    "workflow_status": "error",
+                },
             )
 
     async def reflect_code(self, state: BaseState, max_iterations: int = 3) -> Command:
         """Review generated code and provide feedback for improvement"""
         try:
             reflection_count = state.get("reflection_count", 0)
-            
+
             # Check if we've completed the maximum number of reflection cycles
             if reflection_count >= max_iterations:
                 return Command(
                     goto="create_gitlab_branch",
                     update={
                         "workflow_status": "reflection_completed",
-                        "messages": state["messages"] + [
-                            AIMessage(content=f"Code reflection and improvement cycle completed after {max_iterations} iterations. Code is ready for commit.")
-                        ]
-                    }
+                        "messages": state["messages"]
+                        + [
+                            AIMessage(
+                                content=f"Code reflection and improvement cycle completed after {max_iterations} iterations. Code is ready for commit."
+                            )
+                        ],
+                    },
                 )
 
             ticket_data = state["jira_ticket_data"]
@@ -167,7 +181,9 @@ class CodeGenerator:
 
             messages = [
                 SystemMessage(content=reflection_prompt),
-                HumanMessage(content="Review this code and provide detailed feedback for improvement.")
+                HumanMessage(
+                    content="Review this code and provide detailed feedback for improvement."
+                ),
             ]
 
             response = self.llm.invoke(messages)
@@ -180,10 +196,13 @@ class CodeGenerator:
                     "reflection_feedback": feedback,
                     "reflection_count": reflection_count + 1,
                     "workflow_status": f"reflection_completed_iteration_{reflection_count + 1}",
-                    "messages": state["messages"] + [
-                        AIMessage(content=f"Code reflection iteration {reflection_count + 1} completed. Feedback provided for code improvement.")
-                    ]
-                }
+                    "messages": state["messages"]
+                    + [
+                        AIMessage(
+                            content=f"Code reflection iteration {reflection_count + 1} completed. Feedback provided for code improvement."
+                        )
+                    ],
+                },
             )
 
         except Exception as e:
@@ -192,6 +211,6 @@ class CodeGenerator:
                 goto="handle_error",
                 update={
                     "error_message": f"Error in code reflection: {str(e)}",
-                    "workflow_status": "error"
-                }
+                    "workflow_status": "error",
+                },
             )

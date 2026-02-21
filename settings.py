@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     mcp_gitlab_url: str = Field(default="", alias="MCP_GITLAB_URL")
     mcp_github_url: str = Field(default="", alias="MCP_GITHUB_URL")
 
+    # MCP Server Enable Flags
+    mcp_atlassian_enabled: bool = Field(default=True, alias="MCP_ATLASSIAN_ENABLED")
+    mcp_gitlab_enabled: bool = Field(default=True, alias="MCP_GITLAB_ENABLED")
+    mcp_github_enabled: bool = Field(default=True, alias="MCP_GITHUB_ENABLED")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

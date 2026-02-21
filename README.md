@@ -138,7 +138,7 @@ An intelligent multi-agent AI assistant system designed for enterprise environme
    ```bash
    # Install Ollama (macOS/Linux)
    curl -fsSL https://ollama.ai/install.sh | sh
-   
+
    # Pull required models
    ollama pull llama3:8b
    ollama pull nomic-embed-text
@@ -251,7 +251,7 @@ See [MCP_ARCHITECTURE.md](MCP_ARCHITECTURE.md) for detailed information.
    ```bash
    # Health check
    curl http://localhost:8000/api/health
-   
+
    # Chat request
    curl -X POST http://localhost:8000/api/supervisor/chat \
      -H "Content-Type: application/json" \

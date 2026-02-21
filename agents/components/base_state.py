@@ -20,4 +20,3 @@ class BaseState(Protocol):
     def __setitem__(self, key: str, value: Any) -> None:
         """Set state value by key using bracket notation"""
         ...
-

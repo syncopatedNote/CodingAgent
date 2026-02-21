@@ -179,7 +179,7 @@ For production deployments, **always use SSE transport**:
 
 **Cause**: MCP service not running or wrong URL
 
-**Fix**: 
+**Fix**:
 ```bash
 # Check if MCP services are running
 docker compose ps

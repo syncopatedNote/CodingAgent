@@ -13,9 +13,7 @@ from settings import settings
 
 # Page configuration
 st.set_page_config(
-    page_title="AI Assistant - Simplified Supervisor",
-    page_icon="🤖",
-    layout="wide"
+    page_title="AI Assistant - Simplified Supervisor", page_icon="🤖", layout="wide"
 )
 
 
@@ -50,18 +48,23 @@ def run_supervisor_sync(supervisor, user_input, conversation_history):
             # We're in an async context, but Streamlit runs sync
             # Use asyncio.run in a thread to avoid conflicts
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(
-                    asyncio.run, 
-                    run_supervisor_async(supervisor, user_input, conversation_history)
+                    asyncio.run,
+                    run_supervisor_async(supervisor, user_input, conversation_history),
                 )
                 return future.result()
         else:
             # No event loop running, safe to use asyncio.run
-            return asyncio.run(run_supervisor_async(supervisor, user_input, conversation_history))
+            return asyncio.run(
+                run_supervisor_async(supervisor, user_input, conversation_history)
+            )
     except RuntimeError:
         # No event loop, safe to use asyncio.run
-        return asyncio.run(run_supervisor_async(supervisor, user_input, conversation_history))
+        return asyncio.run(
+            run_supervisor_async(supervisor, user_input, conversation_history)
+        )
 
 
 def display_task_analysis(result: Dict):
@@ -76,14 +79,18 @@ def display_task_analysis(result: Dict):
             # Display task type with emoji
             task_emoji = {
                 "search_operation": "🔍",
-                "code_generation": "💻", 
-                "general_chat": "💬"
+                "code_generation": "💻",
+                "general_chat": "💬",
             }
 
-            task_name = task_type.value if hasattr(task_type, 'value') else str(task_type)
+            task_name = (
+                task_type.value if hasattr(task_type, "value") else str(task_type)
+            )
             emoji = task_emoji.get(task_name, "❓")
 
-            st.write(f"**Detected Task:** {emoji} {task_name.replace('_', ' ').title()}")
+            st.write(
+                f"**Detected Task:** {emoji} {task_name.replace('_', ' ').title()}"
+            )
             st.write(f"**Confidence:** {confidence:.2f}")
 
             # Display extracted Jira tickets
@@ -98,7 +105,9 @@ def display_task_analysis(result: Dict):
             st.write("**🔍 Search Agent:** Executed")
             search_type = result["search_agent_result"].get("search_type")
             if search_type:
-                st.write(f"- Search Type: {search_type.value if hasattr(search_type, 'value') else str(search_type)}")
+                st.write(
+                    f"- Search Type: {search_type.value if hasattr(search_type, 'value') else str(search_type)}"
+                )
 
         if result.get("coding_agent_result"):
             st.write("**💻 Coding Agent:** Executed")
@@ -110,26 +119,32 @@ def display_help_section():
         st.header("🚀 What I Can Do")
 
         st.subheader("🔍 Search Operations")
-        st.markdown("""
+        st.markdown(
+            """
         - **Find Confluence docs:** "Search for API documentation"
         - **Look up Jira tickets:** "Show me ticket PROJ-123"
         - **Search issues:** "Find recent bugs in DEV project"
         - **General search:** "Look for deployment guides"
-        """)
+        """
+        )
 
         st.subheader("💻 Code Generation")
-        st.markdown("""
+        st.markdown(
+            """
         - **From Jira ticket:** "Generate code for DEV-456"
         - **Implement feature:** "Implement the feature in STORY-789"
         - **Build component:** "Write code for TASK-123"
-        """)
+        """
+        )
 
         st.subheader("💬 General Help")
-        st.markdown("""
+        st.markdown(
+            """
         - Ask about capabilities
         - Get guidance on workflows
         - Learn about available tools
-        """)
+        """
+        )
 
 
 def display_example_queries():
@@ -143,7 +158,7 @@ def display_example_queries():
             ("💻 Generate code", "Generate code for CBP-8446"),
             ("🐛 Find bugs", "Search for recent bugs in production"),
             ("📚 Confluence search", "Find confluence pages about deployment"),
-            ("❓ Get help", "What can you help me with?")
+            ("❓ Get help", "What can you help me with?"),
         ]
 
         for label, query in examples:
@@ -176,7 +191,7 @@ def main():
             st.markdown(message["content"])
 
     # Handle example query selection
-    if hasattr(st.session_state, 'example_query'):
+    if hasattr(st.session_state, "example_query"):
         user_input = st.session_state.example_query
         del st.session_state.example_query
     else:
@@ -191,7 +206,7 @@ def main():
         with st.chat_message("assistant"):
             # Create a placeholder for progressive updates
             response_placeholder = st.empty()
-            
+
             with st.spinner("🔄 Processing your request..."):
                 try:
                     # Convert messages to LangChain format
@@ -203,32 +218,42 @@ def main():
                     response_placeholder.markdown("🔄 **Processing your request...**")
 
                     # Run supervisor agent (now handling async properly)
-                    result = run_supervisor_sync(supervisor, user_input, conversation_history)
+                    result = run_supervisor_sync(
+                        supervisor, user_input, conversation_history
+                    )
                     st.session_state.supervisor_state = result
 
                     # Display the response with proper formatting
-                    response = result.get("final_response", "I'm sorry, I couldn't process your request.")
-                    
+                    response = result.get(
+                        "final_response", "I'm sorry, I couldn't process your request."
+                    )
+
                     # Clear the placeholder and show the final response
                     response_placeholder.empty()
                     st.markdown(response)
 
                     # Add to message history
-                    st.session_state.messages.append({"role": "assistant", "content": response})
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": response}
+                    )
 
                     # Display task analysis in sidebar
                     display_task_analysis(result)
 
                     # Show additional info if user input is required
                     if result.get("requires_user_input"):
-                        st.info("💡 **Additional Information Needed** - Please provide the requested details in your next message.")
+                        st.info(
+                            "💡 **Additional Information Needed** - Please provide the requested details in your next message."
+                        )
 
                 except Exception as e:
                     error_msg = f"## ❌ Error\n\nAn error occurred while processing your request:\n\n```\n{str(e)}\n```\n\nPlease try again or rephrase your request."
                     response_placeholder.empty()
                     st.error("An error occurred while processing your request.")
                     st.markdown(error_msg)
-                    st.session_state.messages.append({"role": "assistant", "content": error_msg})
+                    st.session_state.messages.append(
+                        {"role": "assistant", "content": error_msg}
+                    )
 
     # Display current state info (for debugging)
     if st.session_state.supervisor_state:
@@ -237,11 +262,19 @@ def main():
 
             with col1:
                 st.subheader("Task Classification")
-                st.json({
-                    "task_type": str(st.session_state.supervisor_state.get("task_type", "")),
-                    "confidence": st.session_state.supervisor_state.get("confidence", 0),
-                    "jira_tickets": st.session_state.supervisor_state.get("extracted_jira_tickets", [])
-                })
+                st.json(
+                    {
+                        "task_type": str(
+                            st.session_state.supervisor_state.get("task_type", "")
+                        ),
+                        "confidence": st.session_state.supervisor_state.get(
+                            "confidence", 0
+                        ),
+                        "jira_tickets": st.session_state.supervisor_state.get(
+                            "extracted_jira_tickets", []
+                        ),
+                    }
+                )
 
             with col2:
                 st.subheader("Agent Results")
@@ -269,23 +302,27 @@ def main():
 
     with col3:
         if st.button("💾 Export Chat", use_container_width=True):
-            chat_export = "\n".join([
-                f"{msg['role'].upper()}: {msg['content']}" 
-                for msg in st.session_state.messages
-            ])
+            chat_export = "\n".join(
+                [
+                    f"{msg['role'].upper()}: {msg['content']}"
+                    for msg in st.session_state.messages
+                ]
+            )
             st.download_button(
                 label="Download",
                 data=chat_export,
                 file_name="chat_history.txt",
                 mime="text/plain",
-                use_container_width=True
+                use_container_width=True,
             )
 
     with col4:
         # Environment status
         # env_status = "🟢" if os.getenv("OPENAI_API_KEY") and os.getenv("GITLAB_PROJECT_ID") else "🟡"
         env_status = "🟢"
-        st.button(f"{env_status} Coding Agent", disabled=False, use_container_width=True)
+        st.button(
+            f"{env_status} Coding Agent", disabled=False, use_container_width=True
+        )
 
     # Status bar at bottom
     st.markdown("---")
