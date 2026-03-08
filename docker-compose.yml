@@ -1,20 +1,46 @@
-
 services:
-  # Supervisor Agent API Service
+  # Agent UI - Next.js Frontend
+  agent-ui:
+    build:
+      context: ./Agent_UI
+      dockerfile: Dockerfile
+    container_name: agent-ui
+    ports:
+      - "3000:3000"
+    environment:
+      # API endpoint for the backend
+      NEXT_PUBLIC_API_URL: http://supervisor-api:8000
+      NODE_ENV: production
+    depends_on:
+      - supervisor-api
+    networks:
+      - supervisor-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Supervisor Agent API Service (Backend)
   supervisor-api:
     build:
       context: .
       dockerfile: dockerfile.api
-    container_name: supervisor-agent-api
+    container_name: supervisor-api
     ports:
       - "8000:8000"
     environment:
-      # LLM Configuration
+      # LLM Configuration - Point to LiteLLM proxy
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       GITHUB_TOKEN: ${GITHUB_TOKEN}
       LLM_PROVIDER: ${LLM_PROVIDER:-litellm}
       LLM_MODEL_NAME: ${LLM_MODEL_NAME:-gpt-4o-mini}
       LLM_MODEL_TYPE: ${LLM_MODEL_TYPE:-chat}
+
+      # LiteLLM Proxy URL (if using local LiteLLM service)
+      LITELLM_PROXY_URL: ${LITELLM_PROXY_URL:-http://litellm:4000}
 
       # LangSmith Tracing
       LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
@@ -45,37 +71,83 @@ services:
       MCP_VERY_VERBOSE: ${MCP_VERY_VERBOSE:-true}
 
       # MCP Server URLs (for SSE transport)
-      MCP_ATLASSIAN_URL: http://mcp-atlassian:3000
-      MCP_GITLAB_URL: http://mcp-gitlab:3002
-      # MCP_GITHUB_URL: Not used - GitHub uses stdio transport
+      MCP_ATLASSIAN_URL: ${MCP_ATLASSIAN_URL:-http://mcp-atlassian:3000}
+      MCP_GITLAB_URL: ${MCP_GITLAB_URL:-http://mcp-gitlab:3002}
+      MCP_CONTEXT7_URL: ${MCP_CONTEXT7_URL:-http://mcp-context7:3003}
+      MCP_CONTEXT7_ENABLED: ${MCP_CONTEXT7_ENABLED:-true}
+      MCP_ATLASSIAN_ENABLED: ${MCP_ATLASSIAN_ENABLED:-true}
+      MCP_GITLAB_ENABLED: ${MCP_GITLAB_ENABLED:-true}
+      MCP_GITHUB_ENABLED: ${MCP_GITHUB_ENABLED:-true}
     volumes:
-      - ./:/app
+      - .:/app
       - chroma_db:/app/chroma_db
     depends_on:
-      - mongodb
       - mcp-atlassian
       - mcp-gitlab
+      - mcp-context7
+      - litellm
     networks:
       - supervisor-network
     restart: unless-stopped
 
-  # MongoDB for Document Storage
-  mongodb:
-    image: mongo:7.0
-    container_name: supervisor-mongodb
+  # LiteLLM Proxy Server
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: litellm-proxy
     ports:
-      - "27017:27017"
+      - "4000:4000"
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME:-admin}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-password}
+      # LiteLLM Configuration
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-1234}
+      # Provider API Keys
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      AZURE_API_KEY: ${AZURE_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GITHUB_LITE_LLM_PAT: ${GITHUB_LITE_LLM_PAT}
+
+      # AWS Credentials for Bedrock
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION_NAME: ${AWS_REGION:-us-east-1}
+
+      # LiteLLM Settings
+      LITELLM_LOG: "INFO"
     volumes:
-      - mongodb_data:/data/db
-      - mongodb_config:/data/configdb
+      - ./litellm_config.yaml:/app/config.yaml:ro
+    command: --config /app/config.yaml --port 4000 --num_workers 4
     networks:
       - supervisor-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
-  # MCP Atlassian Server (Confluence & Jira) - Persistent Service
+  # # MongoDB for Document Storage
+  # mongodb:
+  #   image: mongo:7.0
+  #   container_name: supervisor-mongodb
+  #   ports:
+  #     - "27017:27017"
+  #   environment:
+  #     MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME:-admin}
+  #     MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-password}
+  #   volumes:
+  #     - mongodb_data:/data/db
+  #     - mongodb_config:/data/configdb
+  #   networks:
+  #     - supervisor-network
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+
+  # MCP Atlassian Server (Confluence & Jira)
   mcp-atlassian:
     image: ghcr.io/sooperset/mcp-atlassian:latest
     container_name: mcp-atlassian-server
@@ -102,7 +174,7 @@ services:
       retries: 3
       start_period: 40s
 
-  # MCP GitLab Server - Persistent Service
+  # MCP GitLab Server
   mcp-gitlab:
     image: zereight050/gitlab-mcp:latest
     container_name: mcp-gitlab-server
@@ -116,7 +188,6 @@ services:
       USE_GITLAB_WIKI: "true"
       USE_MILESTONE: "true"
       USE_PIPELINE: "true"
-      # SSE: "true"
     networks:
       - supervisor-network
     restart: unless-stopped
@@ -127,34 +198,72 @@ services:
       retries: 3
       start_period: 40s
 
-  # Optional: MongoDB Express for GUI management
-  mongo-express:
-    image: mongo-express:latest
-    container_name: supervisor-mongo-express
+  # MCP Context7 Server (Library Documentation)
+  mcp-context7:
+    image: node:20-alpine
+    container_name: mcp-context7-server
     ports:
-      - "8081:8081"
-    environment:
-      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_USERNAME:-admin}
-      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_PASSWORD:-password}
-      ME_CONFIG_MONGODB_URL: mongodb://admin:password@mongodb:27017/
-    depends_on:
-      - mongodb
+      - "3003:3003"
+    command: npx -y supergateway --stdio "npx -y @upstash/context7-mcp" --outputTransport streamableHttp --port 3003 --host 0.0.0.0
     networks:
       - supervisor-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3003/mcp"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # # Optional: MongoDB Express for GUI management
+  # mongo-express:
+  #   image: mongo-express:latest
+  #   container_name: supervisor-mongo-express
+  #   ports:
+  #     - "8081:8081"
+  #   environment:
+  #     ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_USERNAME:-admin}
+  #     ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_PASSWORD:-password}
+  #     ME_CONFIG_MONGODB_URL: mongodb://${MONGO_USERNAME:-admin}:${MONGO_PASSWORD:-password}@mongodb:27017/
+  #   depends_on:
+  #     - mongodb
+  #   networks:
+  #     - supervisor-network
+  #   restart: unless-stopped
+  #   profiles:
+  #     - debug
 
 volumes:
-  mongodb_data:
-  mongodb_config:
+  # mongodb_data:
+  #   driver: local
+  # mongodb_config:
+  #   driver: local
   chroma_db:
+    driver: local
 
 networks:
   supervisor-network:
     driver: bridge
 
-# Usage:
-# 1. Create .env file with necessary environment variables
-# 2. Run: docker-compose up -d
-# 3. API available at http://localhost:8000
-# 4. MongoDB Express available at http://localhost:8081
-# 5. Logs: docker-compose logs -f supervisor-api
+# Usage Instructions:
+# ==================
+# 1. Create .env file with necessary environment variables (see .env.example)
+# 2. Create litellm_config.yaml for LiteLLM configuration
+# 3. Run: docker-compose up -d
+#
+# Services Available:
+# - Agent UI (Next.js):          http://localhost:3000
+# - Supervisor API (Backend):    http://localhost:8000
+# - LiteLLM Proxy:               http://localhost:4000
+# - MongoDB Express (optional):  http://localhost:8081
+# - MCP Atlassian:               http://localhost:3001
+# - MCP GitLab:                  http://localhost:3333
+# - MCP Context7:                http://localhost:3003
+#
+# Commands:
+# - Start all services:          docker-compose up -d
+# - View logs:                   docker-compose logs -f [service-name]
+# - Stop all services:           docker-compose down
+# - Stop and remove volumes:     docker-compose down -v
+# - Rebuild services:            docker-compose up -d --build
+# - Start with debug profile:    docker-compose --profile debug up -d

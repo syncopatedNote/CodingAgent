@@ -77,3 +77,7 @@ chromadb/
 *.tmp
 *.temp
 .cache/
+
+# Node
+node_modules/
+.next/
