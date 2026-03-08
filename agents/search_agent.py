@@ -186,11 +186,19 @@ class SearchAgent:
                             )
                         else:
                             logger.error(f"Tool {tool_name} not found")
+                            error_msg = "Tool not found"
                             tool_results.append(
                                 {
                                     "tool_name": tool_name,
-                                    "error": "Tool not found",
+                                    "error": error_msg,
                                 }
+                            )
+                            # Add error as ToolMessage to maintain message sequence
+                            messages.append(
+                                ToolMessage(
+                                    content=f"Error: {error_msg}",
+                                    tool_call_id=tool_id,
+                                )
                             )
 
                     except Exception as e:
@@ -200,6 +208,13 @@ class SearchAgent:
                                 "tool_name": tool_name,
                                 "error": str(e),
                             }
+                        )
+                        # Add error as ToolMessage to maintain message sequence
+                        messages.append(
+                            ToolMessage(
+                                content=f"Error: {str(e)}",
+                                tool_call_id=tool_id,
+                            )
                         )
 
                 state["tool_results"] = tool_results

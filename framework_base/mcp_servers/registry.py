@@ -97,6 +97,7 @@ def _auto_register_servers(registry: MCPServerRegistry):
     from .servers.atlassian import AtlassianMcpServerConfig
     from .servers.gitlab import GitlabMcpServerConfig
     from .servers.github import GithubMcpServerConfig
+    from .servers.context7 import Context7McpServerConfig
 
     try:
         # Register Atlassian server
@@ -115,3 +116,9 @@ def _auto_register_servers(registry: MCPServerRegistry):
         registry.register(GithubMcpServerConfig())
     except Exception as e:
         logger.error(f"Failed to register GitHub server: {e}")
+
+    try:
+        # Register Context7 server
+        registry.register(Context7McpServerConfig())
+    except Exception as e:
+        logger.error(f"Failed to register Context7 server: {e}")

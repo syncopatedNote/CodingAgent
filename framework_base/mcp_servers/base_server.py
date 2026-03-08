@@ -54,7 +54,7 @@ class MCPServerConfig(BaseModel, ABC):
             raise ValueError(f"Streamable HTTP not supported for server: {self.name}")
         if self.http_port:
             self.http_url = self.http_url + f":{self.http_port}"
-        return {"url": f"{self.http_url}/mcp", "type": "streamable-http"}
+        return {"url": f"{self.http_url}/mcp", "transport": "streamable_http"}
 
     def get_stdio_config(self) -> Dict:
         """Get configuration for stdio transport"""

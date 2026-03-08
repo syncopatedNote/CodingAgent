@@ -56,8 +56,7 @@ curl http://localhost:8000/api/health
 
 **Services Available:**
 - API: http://localhost:8000
-- Streamlit UI: http://localhost:8501
-- MongoDB Express: http://localhost:8081
+- Agent UI: http://localhost:3000
 
 ### Option 2: Local Development
 
@@ -206,27 +205,50 @@ curl -X POST "http://localhost:8000/api/supervisor/chat" \
 
 ---
 
-#### 3. Chat Stream (SSE)
+#### 3. AG-UI Agent Endpoint
 
-**POST** `/api/supervisor/chat-stream`
+**POST** `/api/supervisor/agent`
 
-Stream responses using Server-Sent Events for real-time UI updates.
+Stream responses using the AG-UI protocol (Server-Sent Events with typed events).
 
-**Request:** Same as `/api/supervisor/chat`
+**Request:** AG-UI `RunAgentInput` format
+```json
+{
+  "threadId": "session-123",
+  "runId": "run-1709000000000",
+  "state": {},
+  "messages": [
+    { "id": "msg-0", "role": "user", "content": "Hello" }
+  ],
+  "tools": [],
+  "context": [],
+  "forwardedProps": {}
+}
+```
 
-**Response:** Server-Sent Events stream
+**Response:** AG-UI event stream (SSE) with events:
+- `RUN_STARTED` / `RUN_FINISHED` / `RUN_ERROR` — lifecycle
+- `STEP_STARTED` / `STEP_FINISHED` — processing steps
+- `TEXT_MESSAGE_START` / `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_END` — response text
+- `CUSTOM(task_analysis)` — task classification metadata
 
-**Example:**
+**Example (JavaScript):**
 ```javascript
-const eventSource = new EventSource("http://localhost:8000/api/supervisor/chat-stream");
+import { HttpAgent, EventType } from "@ag-ui/client";
 
-eventSource.addEventListener("message", (event) => {
-  const data = JSON.parse(event.data);
-  if (data.status === "processing") {
-    console.log("Processing...");
-  } else {
-    console.log("Result:", data.response);
-  }
+const agent = new HttpAgent({
+  url: "http://localhost:8000/api/supervisor/agent",
+});
+
+agent.threadId = "session-123";
+agent.messages = [{ id: "msg-0", role: "user", content: "Hello" }];
+
+agent.runAgent({ runId: "run-1", tools: [], context: [] }).subscribe({
+  next: (event) => {
+    if (event.type === EventType.TEXT_MESSAGE_CONTENT) {
+      process.stdout.write(event.delta);
+    }
+  },
 });
 ```
 
@@ -248,7 +270,7 @@ Get API information and available endpoints.
   "endpoints": {
     "health": "/api/health",
     "supervisor_chat": "/api/supervisor/chat",
-    "supervisor_chat_stream": "/api/supervisor/chat-stream"
+    "supervisor_chat_stream": "/api/supervisor/agent"
   }
 }
 ```
@@ -583,7 +605,7 @@ to recieve telemetry from the app for detail tracing of the request.
 1. **Use Session IDs**: Maintain context across requests for better responses
 2. **Cache on Frontend**: Cache supervisor responses for repeated queries
 3. **Implement Timeouts**: Set 60-120 second timeouts for supervisor requests
-4. **Use Streaming**: For long operations, use `/api/supervisor/chat-stream`
+4. **Use Streaming**: For real-time responses, use the AG-UI endpoint `/api/supervisor/agent`
 5. **Monitor MCP Servers**: Ensure MCP containers have adequate resources
 6. **Scale Horizontally**: Run multiple supervisor-api replicas behind load balancer
 

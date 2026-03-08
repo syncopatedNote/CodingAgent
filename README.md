@@ -41,12 +41,12 @@ An intelligent multi-agent AI assistant system designed for enterprise environme
 ## 🏗️ Architecture
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  Streamlit UI   │    │  REST API       │    │  Frontend Apps  │
-│  (Port 8501)    │    │  (Port 8000)    │    │  (HTTP Clients) │
-└─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
-          │                      │                      │
-          └──────────────────────┼──────────────────────┘
+┌─────────────────┐    ┌─────────────────┐
+│  Agent UI       │    │  REST API       │
+│  (Port 3000)    │    │  (Port 8000)    │
+└─────────┬───────┘    └─────────┬───────┘
+          │                      │
+          └──────────┬───────────┘
                                  │
                     ┌─────────────▼─────────────┐
                     │    Supervisor Agent       │
@@ -116,10 +116,9 @@ An intelligent multi-agent AI assistant system designed for enterprise environme
    ```
 
 4. **Access the services**
-   - **Streamlit UI**: http://localhost:8501
+   - **Agent UI**: http://localhost:3000
    - **REST API**: http://localhost:8000
    - **API Docs**: http://localhost:8000/api/docs
-   - **MongoDB Express**: http://localhost:8081
 
 ### Option 2: Local Development
 
@@ -242,10 +241,9 @@ See [MCP_ARCHITECTURE.md](MCP_ARCHITECTURE.md) for detailed information.
    ```
 
 3. **Access the interfaces**
-   - **Streamlit UI**: http://localhost:8501
+   - **Agent UI**: http://localhost:3000
    - **REST API**: http://localhost:8000
    - **API Interactive Docs**: http://localhost:8000/api/docs
-   - **MongoDB Express**: http://localhost:8081
 
 4. **Test the API**
    ```bash
@@ -265,13 +263,7 @@ See [MCP_ARCHITECTURE.md](MCP_ARCHITECTURE.md) for detailed information.
    brew services start mongodb/brew/mongodb-community
    ```
 
-2. **Launch Streamlit UI**
-   ```bash
-   streamlit run chat_with_supervisor.py
-   ```
-   Visit http://localhost:8501
-
-3. **Or launch REST API**
+2. **Launch REST API**
    ```bash
    uvicorn supervisor_api:app --host 0.0.0.0 --port 8000 --reload
    ```
@@ -307,7 +299,7 @@ See [MCP_ARCHITECTURE.md](MCP_ARCHITECTURE.md) for detailed information.
 
 ## 💡 Usage Examples
 
-### Streamlit UI Examples
+### Usage Examples
 
 **Search Operations:**
 ```
@@ -422,7 +414,6 @@ Coding_agent/
 │   └── chat.py                # Simple chat interface
 ├── chroma_db/                 # ChromaDB vector storage (auto-created)
 ├── logs/                      # Application logs (auto-created)
-├── chat_with_supervisor.py    # Streamlit UI application
 ├── supervisor_api.py          # FastAPI REST API service
 ├── settings.py                # Application settings and configuration
 ├── logger.py                  # Logging configuration
@@ -430,7 +421,6 @@ Coding_agent/
 ├── requirements.txt           # Python dependencies
 ├── docker-compose.yml         # Docker Compose configuration
 ├── dockerfile.api             # Dockerfile for API service
-├── dockerfile.streamlit       # Dockerfile for Streamlit UI
 ├── README.md                  # This file
 ├── SUPERVISOR_API_GUIDE.md    # Complete API documentation
 ├── MCP_ARCHITECTURE.md        # MCP integration details
@@ -503,7 +493,6 @@ The Docker Compose setup includes:
 | Service | Port | Description |
 |---------|------|-------------|
 | supervisor-api | 8000 | FastAPI REST API service |
-| streamlit-ui | 8501 | Streamlit web interface |
 | mcp-atlassian | 3000 | MCP server for Jira/Confluence |
 | mcp-gitlab | 3001 | MCP server for GitLab |
 | mongodb | 27017 | MongoDB document store |
@@ -530,7 +519,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - **LangChain** for the RAG framework and agent orchestration
 - **LangGraph** for state machine graph workflows
 - **Ollama** for local LLM deployment
-- **Streamlit** for the user interface
 - **FastAPI** for the REST API framework
 - **ChromaDB** for vector storage
 - **MongoDB** for document persistence
@@ -543,4 +531,3 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - [Ollama Models](https://ollama.ai/library)
 - [MCP Servers](https://github.com/modelcontextprotocol)
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [Streamlit Documentation](https://docs.streamlit.io/)

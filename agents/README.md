@@ -7,7 +7,7 @@ This directory contains the agent-based architecture for the CBP AI Wizard, feat
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    User Interface                           │
-│                 (Streamlit Chat)                           │
+│                 (Agent UI / REST API)                       │
 └─────────────────────┬───────────────────────────────────────┘
                       │
                       ▼
@@ -180,16 +180,10 @@ Ensure these MCP servers are configured and running before using the agents.
 python test_supervisor_integration.py
 ```
 
-### 2. Start the Chat Interface
+### 2. Start the API Server
 
 ```bash
-streamlit run chat_with_supervisor_v2.py
-```
-
-### 3. Alternative: Use Original Chat
-
-```bash
-streamlit run chat.py
+uvicorn supervisor_api:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ## Development Guidelines

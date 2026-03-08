@@ -13,10 +13,16 @@ from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
+from ag_ui.core import RunAgentInput
+from ag_ui_middleware import (
+    AgUIMiddleware,
+    AgentResult,
+    RunContext,
+)
 from agents.supervisor_agent import SupervisorAgent, TaskType
 from logger import setup_logger
 
@@ -25,6 +31,7 @@ logger = setup_logger(__name__)
 # ==================== Global Agent Instance ====================
 
 supervisor_agent: Optional[SupervisorAgent] = None
+ag_ui = AgUIMiddleware()
 
 
 def initialize_agent():
@@ -264,63 +271,47 @@ async def supervisor_chat(request: SupervisorRequest) -> SupervisorResponse:
         )
 
 
-@app.post("/api/supervisor/chat-stream", tags=["Supervisor"])
-async def supervisor_chat_stream(request: SupervisorRequest):
+@app.post("/api/supervisor/agent", tags=["Supervisor"])
+async def supervisor_agent_endpoint(input_data: RunAgentInput, request: Request):
     """
-    Send a query to the supervisor agent with streaming response.
+    AG-UI protocol endpoint for the supervisor agent.
 
-    This endpoint streams the response as it's being generated,
-    useful for real-time UI updates.
-
-    Args:
-        request: SupervisorRequest containing user input and
-        optional conversation history
-
-    Yields:
-        JSON chunks with intermediate results and final response
+    Delegates the entire event lifecycle (including
+    interrupt-aware resume) to :class:`AgUIMiddleware`.
     """
     if not supervisor_agent:
         raise HTTPException(
             status_code=503,
-            detail="Supervisor agent not initialized. Please try again later.",
+            detail="Supervisor agent not initialized.",
         )
 
-    async def event_generator():
-        try:
-            # Convert conversation history
-            conversation_history = []
-            if request.conversation_history:
-                conversation_history = convert_messages_to_langchain(
-                    request.conversation_history
-                )
+    async def _agent_fn(
+        user_input: str,
+        conversation_history: list[BaseMessage],
+        context: RunContext,
+    ) -> AgentResult:
+        """
+        Thin wrapper that calls the supervisor agent
+        and returns an :class:`AgentResult`.
+        """
+        final_state = await supervisor_agent.run(
+            user_input=user_input,
+            conversation_history=conversation_history,
+        )
+        response_data = extract_response_data(final_state)
 
-            # Send processing started event
-            yield f"data: {{'status': 'processing', 'message': 'Processing your request...'}}\n\n"
+        return AgentResult(
+            response=response_data.response,
+            metadata={
+                "task_type": (response_data.task_analysis.task_type),
+                "confidence": (response_data.task_analysis.confidence),
+                "extracted_jira_tickets": (
+                    response_data.task_analysis.extracted_jira_tickets
+                ),
+            },
+        )
 
-            # Run the supervisor agent
-            final_state = await supervisor_agent.run(
-                user_input=request.user_input, conversation_history=conversation_history
-            )
-
-            # Extract response
-            response = extract_response_data(final_state, session_id=request.session_id)
-
-            # Send final response
-            yield f"data: {response.model_dump_json()}\n\n"
-
-        except Exception as e:
-            logger.error(f"Error in streaming response: {str(e)}", exc_info=True)
-            yield f"data: {{'status': 'error', 'message': '{str(e)}'}}\n\n"
-
-    return JSONResponse(
-        content=None,
-        status_code=200,
-        headers={
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
-    )
+    return ag_ui.create_response(input_data, request, agent_fn=_agent_fn)
 
 
 # ==================== Error Handlers ====================
@@ -369,7 +360,7 @@ async def root():
         "endpoints": {
             "health": "/api/health",
             "supervisor_chat": "/api/supervisor/chat",
-            "supervisor_chat_stream": "/api/supervisor/chat-stream",
+            "supervisor_agent": "/api/supervisor/agent",
         },
     }
 

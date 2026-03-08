@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessage
 from langchain_mcp_adapters.tools import load_mcp_tools
 from framework_base.multi_server_mcp_client import multi_server_mcp_client
 from .base_state import BaseState
-from ...logger import setup_logger
+from logger import setup_logger
 
 logger = setup_logger(__name__)
 
