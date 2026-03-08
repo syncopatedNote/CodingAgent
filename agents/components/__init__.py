@@ -10,9 +10,9 @@ from .code_generator import CodeGenerator
 from .gitlab_handler import GitLabHandler
 
 __all__ = [
-    'BaseState',
-    'JiraHandler',
-    'ConfluenceHandler', 
-    'CodeGenerator',
-    'GitLabHandler'
+    "BaseState",
+    "JiraHandler",
+    "ConfluenceHandler",
+    "CodeGenerator",
+    "GitLabHandler",
 ]

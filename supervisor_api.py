@@ -13,10 +13,16 @@ from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
+from ag_ui.core import RunAgentInput
+from ag_ui_middleware import (
+    AgUIMiddleware,
+    AgentResult,
+    RunContext,
+)
 from agents.supervisor_agent import SupervisorAgent, TaskType
 from logger import setup_logger
 
@@ -25,6 +31,7 @@ logger = setup_logger(__name__)
 # ==================== Global Agent Instance ====================
 
 supervisor_agent: Optional[SupervisorAgent] = None
+ag_ui = AgUIMiddleware()
 
 
 def initialize_agent():
@@ -48,6 +55,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Supervisor API service shutting down")
 
+
 # ==================== Pydantic Models ====================
 
 
@@ -66,8 +74,7 @@ class SupervisorRequest(BaseModel):
         default=None, description="Previous conversation messages for context"
     )
     session_id: Optional[str] = Field(
-        default=None,
-        description="Optional session ID for tracking conversations"
+        default=None, description="Optional session ID for tracking conversations"
     )
 
 
@@ -75,25 +82,18 @@ class TaskAnalysis(BaseModel):
     """Task analysis information"""
 
     task_type: Optional[str] = Field(None, description="Detected task type")
-    confidence: float = Field(
-        ...,
-        description="Confidence score of classification"
-    )
+    confidence: float = Field(..., description="Confidence score of classification")
     extracted_jira_tickets: List[str] = Field(
-        default_factory=list,
-        description="Jira tickets extracted from the input"
+        default_factory=list, description="Jira tickets extracted from the input"
     )
 
 
 class SupervisorResponse(BaseModel):
     """Response model from supervisor agent"""
 
-    session_id: Optional[str] = Field(None,
-                                      description="Session ID for tracking")
-    task_analysis: TaskAnalysis = Field(...,
-                                        description="Analysis of the task")
-    response: str = Field(...,
-                          description="Final response from the supervisor")
+    session_id: Optional[str] = Field(None, description="Session ID for tracking")
+    task_analysis: TaskAnalysis = Field(..., description="Analysis of the task")
+    response: str = Field(..., description="Final response from the supervisor")
     search_results: Optional[Dict[str, Any]] = Field(
         None, description="Results from search agent if applicable"
     )
@@ -151,8 +151,7 @@ def convert_messages_to_langchain(messages: List[MessageDTO]) -> List[BaseMessag
 
 
 def extract_response_data(
-        state: Dict[str, Any],
-        session_id: Optional[str] = None
+    state: Dict[str, Any], session_id: Optional[str] = None
 ) -> SupervisorResponse:
     """Extract structured response from supervisor agent state"""
     task_type = state.get("task_type")
@@ -167,8 +166,10 @@ def extract_response_data(
         if error_msg:
             final_response = f"I encountered an error: {error_msg}"
         else:
-            final_response = "I'm sorry, I couldn't generate a response." \
+            final_response = (
+                "I'm sorry, I couldn't generate a response."
                 "Please try rephrasing your question."
+            )
 
     return SupervisorResponse(
         session_id=session_id,
@@ -199,16 +200,13 @@ async def health_check():
     return HealthCheckResponse(
         status="healthy" if supervisor_agent else "initializing",
         message=(
-            "Supervisor API is running"
-            if supervisor_agent
-            else "Agent is initializing"
+            "Supervisor API is running" if supervisor_agent else "Agent is initializing"
         ),
     )
 
 
 @app.post(
-    "/api/supervisor/chat",
-    response_model=SupervisorResponse, tags=["Supervisor"]
+    "/api/supervisor/chat", response_model=SupervisorResponse, tags=["Supervisor"]
 )
 async def supervisor_chat(request: SupervisorRequest) -> SupervisorResponse:
     """
@@ -248,8 +246,7 @@ async def supervisor_chat(request: SupervisorRequest) -> SupervisorResponse:
         # Run the supervisor agent
         logger.info(f"Processing user input: {request.user_input[:100]}...")
         final_state = await supervisor_agent.run(
-            user_input=request.user_input,
-            conversation_history=conversation_history
+            user_input=request.user_input, conversation_history=conversation_history
         )
 
         # Debug logging
@@ -258,8 +255,7 @@ async def supervisor_chat(request: SupervisorRequest) -> SupervisorResponse:
         logger.info(f"error_message value: {final_state.get('error_message')}")
 
         # Extract and structure the response
-        response = extract_response_data(final_state,
-                                         session_id=request.session_id)
+        response = extract_response_data(final_state, session_id=request.session_id)
         response.session_id = request.session_id
 
         logger.info(
@@ -269,72 +265,53 @@ async def supervisor_chat(request: SupervisorRequest) -> SupervisorResponse:
         return response
 
     except Exception as e:
-        logger.error(f"Error processing supervisor request: {str(e)}",
-                     exc_info=True)
+        logger.error(f"Error processing supervisor request: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500, detail=f"Error processing request: {str(e)}"
         )
 
 
-@app.post("/api/supervisor/chat-stream", tags=["Supervisor"])
-async def supervisor_chat_stream(request: SupervisorRequest):
+@app.post("/api/supervisor/agent", tags=["Supervisor"])
+async def supervisor_agent_endpoint(input_data: RunAgentInput, request: Request):
     """
-    Send a query to the supervisor agent with streaming response.
+    AG-UI protocol endpoint for the supervisor agent.
 
-    This endpoint streams the response as it's being generated,
-    useful for real-time UI updates.
-
-    Args:
-        request: SupervisorRequest containing user input and
-        optional conversation history
-
-    Yields:
-        JSON chunks with intermediate results and final response
+    Delegates the entire event lifecycle (including
+    interrupt-aware resume) to :class:`AgUIMiddleware`.
     """
     if not supervisor_agent:
         raise HTTPException(
             status_code=503,
-            detail="Supervisor agent not initialized. Please try again later.",
+            detail="Supervisor agent not initialized.",
         )
 
-    async def event_generator():
-        try:
-            # Convert conversation history
-            conversation_history = []
-            if request.conversation_history:
-                conversation_history = convert_messages_to_langchain(
-                    request.conversation_history
-                )
+    async def _agent_fn(
+        user_input: str,
+        conversation_history: list[BaseMessage],
+        context: RunContext,
+    ) -> AgentResult:
+        """
+        Thin wrapper that calls the supervisor agent
+        and returns an :class:`AgentResult`.
+        """
+        final_state = await supervisor_agent.run(
+            user_input=user_input,
+            conversation_history=conversation_history,
+        )
+        response_data = extract_response_data(final_state)
 
-            # Send processing started event
-            yield f"data: {{'status': 'processing', 'message': 'Processing your request...'}}\n\n"
+        return AgentResult(
+            response=response_data.response,
+            metadata={
+                "task_type": (response_data.task_analysis.task_type),
+                "confidence": (response_data.task_analysis.confidence),
+                "extracted_jira_tickets": (
+                    response_data.task_analysis.extracted_jira_tickets
+                ),
+            },
+        )
 
-            # Run the supervisor agent
-            final_state = await supervisor_agent.run(
-                user_input=request.user_input,
-                conversation_history=conversation_history
-            )
-
-            # Extract response
-            response = extract_response_data(final_state,
-                                             session_id=request.session_id)
-
-            # Send final response
-            yield f"data: {response.model_dump_json()}\n\n"
-
-        except Exception as e:
-            logger.error(f"Error in streaming response: {str(e)}", exc_info=True)
-            yield f"data: {{'status': 'error', 'message': '{str(e)}'}}\n\n"
-
-    return JSONResponse(
-        content=None,
-        status_code=200,
-        headers={
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
-    )
+    return ag_ui.create_response(input_data, request, agent_fn=_agent_fn)
 
 
 # ==================== Error Handlers ====================
@@ -383,7 +360,7 @@ async def root():
         "endpoints": {
             "health": "/api/health",
             "supervisor_chat": "/api/supervisor/chat",
-            "supervisor_chat_stream": "/api/supervisor/chat-stream"
+            "supervisor_agent": "/api/supervisor/agent",
         },
     }
 
@@ -394,4 +371,4 @@ if __name__ == "__main__":
     import uvicorn
 
     # Run the API server
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info", reload=True)
+    uvicorn.run(app, host="127.0.0.0", port=8000, log_level="info", reload=True)

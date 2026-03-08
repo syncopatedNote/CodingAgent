@@ -53,8 +53,7 @@ class SupervisorAgent:
         llm_kwargs = {"temperature": 0.3}
 
         # Add base_url for ollama if provider is ollama
-        if settings.llm_provider.lower() == "ollama"\
-                and settings.ollama_base_url:
+        if settings.llm_provider.lower() == "ollama" and settings.ollama_base_url:
             llm_kwargs["base_url"] = settings.ollama_base_url
 
         self.llm = LLMFactory.create_llm(
@@ -183,77 +182,67 @@ class SupervisorAgent:
         return re.findall(jira_pattern, text)
 
     def _classify_task_simple(self, user_input: str, jira_tickets: List[str]) -> tuple:
-        """Simple task classification based on keywords"""
-        user_input_lower = user_input.lower()
+        """Use LLM to intelligently classify the user's intent"""
 
-        # Code generation keywords and patterns
-        code_generation_keywords = [
-            "generate code",
-            "write code",
-            "implement",
-            "develop",
-            "coding",
-            "create code",
-            "build",
-            "code for",
-            "implement feature",
-            "development",
-            "programming",
-            "write function",
-            "create class",
-        ]
-
-        # Check for code generation intent
-        if any(keyword in user_input_lower for keyword in code_generation_keywords):
-            return TaskType.CODE_GENERATION, 0.9
-
-        # If Jira ticket is mentioned with code-related context
-        if jira_tickets and any(
-            keyword in user_input_lower
-            for keyword in ["code", "implement", "develop", "build", "create"]
-        ):
-            return TaskType.CODE_GENERATION, 0.8
-
-        # Search operation keywords
-        search_keywords = [
-            "search",
-            "find",
-            "look for",
-            "show me",
-            "get",
-            "fetch",
-            "display",
-            "list",
-            "what is",
-            "tell me about",
-            "information about",
-        ]
-
-        # Check for search intent
-        if any(keyword in user_input_lower for keyword in search_keywords):
-            return TaskType.SEARCH_OPERATION, 0.8
-
-        # If Jira ticket is mentioned without code context, it's likely a search
+        jira_context = ""
         if jira_tickets:
-            return TaskType.SEARCH_OPERATION, 0.7
+            jira_context = f"\n\nDetected Jira tickets: {', '.join(jira_tickets)}"
 
-        # Confluence/Jira specific terms indicate search
-        if any(
-            keyword in user_input_lower
-            for keyword in [
-                "confluence",
-                "jira",
-                "ticket",
-                "issue",
-                "documentation",
-                "wiki",
-                "page",
-            ]
-        ):
-            return TaskType.SEARCH_OPERATION, 0.7
+        classification_prompt = f"""
+            Classify the following user request into exactly one of these categories:
+            **Categories:**
+            1. CODE_GENERATION - User wants to generate, write, implement, or develop code
+            2. SEARCH_OPERATION - User wants to find, search, lookup, or retrieve information from Confluence, Jira, or documentation
+            3. GENERAL_CHAT - General questions, greetings, or requests that don't fit the above
 
-        # Default to general chat
-        return TaskType.GENERAL_CHAT, 0.5
+            **User Request:** {user_input}{jira_context}
+
+            **Classification Rules:**
+            - If the request mentions generating/implementing code or includes Jira tickets with coding context → CODE_GENERATION
+            - If the request is about finding/searching information, looking up documentation, or fetching Jira/Confluence data → SEARCH_OPERATION
+            - If the request is a general question, greeting, or casual conversation → GENERAL_CHAT
+
+            **Response Format (respond with ONLY this format, nothing else):**
+            CATEGORY: [ONE OF: CODE_GENERATION, SEARCH_OPERATION, GENERAL_CHAT]
+            CONFIDENCE: [0.0-1.0]
+            REASONING: [Brief one-line explanation]
+
+            Examples:
+            - "Generate code for PROJ-123" → CODE_GENERATION, 0.95
+            - "Find documentation about API" → SEARCH_OPERATION, 0.90
+            - "What can you help with?" → GENERAL_CHAT, 0.85
+        """
+
+        try:
+            response = self.llm.invoke([HumanMessage(content=classification_prompt)])
+            result = response.content.strip()
+
+            # Parse the LLM response
+            task_type = TaskType.GENERAL_CHAT  # default
+            confidence = 0.5  # default
+
+            for line in result.split("\n"):
+                line = line.strip()
+                if line.startswith("CATEGORY:"):
+                    category = line.split(":", 1)[1].strip()
+                    if "CODE_GENERATION" in category:
+                        task_type = TaskType.CODE_GENERATION
+                    elif "SEARCH_OPERATION" in category:
+                        task_type = TaskType.SEARCH_OPERATION
+                    elif "GENERAL_CHAT" in category:
+                        task_type = TaskType.GENERAL_CHAT
+                elif line.startswith("CONFIDENCE:"):
+                    try:
+                        confidence = float(line.split(":", 1)[1].strip())
+                    except ValueError:
+                        confidence = 0.7  # fallback
+
+            return task_type, confidence
+
+        except Exception as e:
+            # Fallback to general chat if LLM classification fails
+            print(f"LLM classification failed: {e}, falling back to GENERAL_CHAT")
+            return TaskType.GENERAL_CHAT, 0.5
 
     async def _invoke_search_agent(self, state: SupervisorState) -> SupervisorState:
         """Invoke the search agent to handle search operations"""
@@ -270,8 +259,8 @@ class SupervisorAgent:
             state["search_agent_result"] = search_result
 
             # Set the final response from search results
-            if search_result.get("formatted_response"):
-                state["final_response"] = search_result["formatted_response"]
+            if search_result.get("final_response"):
+                state["final_response"] = search_result["final_response"]
             elif search_result.get("error_message"):
                 state["error_message"] = search_result["error_message"]
             else:
@@ -302,7 +291,7 @@ class SupervisorAgent:
                 state["pending_action"] = "get_jira_ticket_key"
                 state[
                     "final_response"
-                ] = """To generate code, I need a Jira ticket reference. 
+                ] = """To generate code, I need a Jira ticket reference.
 
                     Please provide the Jira ticket key (e.g., PROJ-123, DEV-456) that contains the requirements for code generation."""
                 return state
@@ -469,9 +458,7 @@ Please provide the Confluence design document link that contains the detailed re
             return "finalize"
 
     async def run(
-        self,
-        user_input: str,
-        conversation_history: List[BaseMessage] = None
+        self, user_input: str, conversation_history: List[BaseMessage] = None
     ) -> Dict:
         """
         Run the simplified supervisor agent workflow

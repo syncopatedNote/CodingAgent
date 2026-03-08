@@ -4,6 +4,7 @@ from framework_base.llm_base import LLMFactory
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain.retrievers.multi_vector import MultiVectorRetriever
+
 # from langchain.storage import InMemoryStore
 from framework_base.doc_store import get_document_store
 from langchain.schema.document import Document
@@ -11,7 +12,8 @@ from framework_base.vector_store import get_vector_store
 from utils import (
     extract_tables_from_pdf,
     extract_images_from_pdf,
-    extract_text_from_pdf)
+    extract_text_from_pdf,
+)
 
 
 from logger import setup_logger
@@ -19,13 +21,17 @@ from logger import setup_logger
 
 logger = setup_logger(__name__)
 
-filename = 'YOUR_FILE_NAME'
+filename = "YOUR_FILE_NAME"
 
 
 def extract_data():
     # read the pdf file.
     current_dir = path.dirname(path.abspath(__file__))
-    file_path = path.join(current_dir, 'pdf_files', 'BP_Service_Order_Orchestration_Technical_Guide_24-08.pdf')
+    file_path = path.join(
+        current_dir,
+        "pdf_files",
+        "BP_Service_Order_Orchestration_Technical_Guide_24-08.pdf",
+    )
 
     logger.info(f"file_path is {file_path}")
 
@@ -49,10 +55,7 @@ def extract_data():
 
     """
     model = LLMFactory.create_llm(
-        provider="ollama",
-        model_name="llama3:8b",
-        model_type="chat",
-        temperature=0.5
+        provider="ollama", model_name="llama3:8b", model_type="chat", temperature=0.5
     )
 
     prompt = ChatPromptTemplate.from_template(prompt_text)
@@ -111,17 +114,17 @@ def extract_data():
         texts=texts,
         text_summaries=text_summaries,
         tables=tables,
-        table_summaries=table_summaries
+        table_summaries=table_summaries,
     )
 
 
 def load_data(
-        images: list,
-        image_summaries: list,
-        texts: list,
-        text_summaries: list,
-        tables: list,
-        table_summaries: list
+    images: list,
+    image_summaries: list,
+    texts: list,
+    text_summaries: list,
+    tables: list,
+    table_summaries: list,
 ):
     vectorstore = get_vector_store()
     # store = InMemoryStore()
@@ -136,7 +139,8 @@ def load_data(
     # Add texts
     doc_ids = [str(uuid.uuid4()) for _ in texts]
     summary_texts = [
-        Document(page_content=summary, metadata={id_key: doc_ids[i]}) for i, summary in enumerate(text_summaries)
+        Document(page_content=summary, metadata={id_key: doc_ids[i]})
+        for i, summary in enumerate(text_summaries)
     ]
     retriever.vectorstore.add_documents(summary_texts)
     retriever.docstore.mset(list(zip(doc_ids, texts)))
@@ -144,7 +148,8 @@ def load_data(
     # Add tables
     table_ids = [str(uuid.uuid4()) for _ in tables]
     summary_tables = [
-        Document(page_content=summary, metadata={id_key: table_ids[i]}) for i, summary in enumerate(table_summaries)
+        Document(page_content=summary, metadata={id_key: table_ids[i]})
+        for i, summary in enumerate(table_summaries)
     ]
     retriever.vectorstore.add_documents(summary_tables)
     retriever.docstore.mset(list(zip(table_ids, tables)))
@@ -152,7 +157,8 @@ def load_data(
     # Add image summaries
     img_ids = [str(uuid.uuid4()) for _ in images]
     summary_img = [
-        Document(page_content=summary, metadata={id_key: img_ids[i]}) for i, summary in enumerate(image_summaries)
+        Document(page_content=summary, metadata={id_key: img_ids[i]})
+        for i, summary in enumerate(image_summaries)
     ]
     retriever.vectorstore.add_documents(summary_img)
     retriever.docstore.mset(list(zip(img_ids, images)))

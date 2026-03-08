@@ -24,7 +24,7 @@ class ConfluenceExtractor:
         username: str,
         api_key: str,
         space_key: str,
-        page_id: str
+        page_id: str,
     ):
         self.confluence_url = confluence_url
         self.api_key = api_key
@@ -32,26 +32,20 @@ class ConfluenceExtractor:
         self.page_id = page_id
         self.username = username
         self.loader = ConfluenceLoader(
-            url=confluence_url,
-            username=username,
-            api_key=api_key,
-            space_key=space_key
+            url=confluence_url, username=username, api_key=api_key, space_key=space_key
         )
 
     def _get_auth_headers(self):
         """Create proper authentication headers"""
         auth_string = f"{self.username}:{self.api_key}"
         encoded_auth = base64.b64encode(auth_string.encode()).decode()
-        return {
-            "Authorization": f"Basic {encoded_auth}",
-            "Accept": "application/json"
-        }
+        return {"Authorization": f"Basic {encoded_auth}", "Accept": "application/json"}
 
     def extract_tables_from_html(self, doc: Document) -> List[str]:
         """Extract tables from HTML content"""
         html_content = doc.page_content
-        soup = BeautifulSoup(html_content, 'html.parser')
-        tables = soup.find_all('table')
+        soup = BeautifulSoup(html_content, "html.parser")
+        tables = soup.find_all("table")
         if tables:
             return [str(table) for table in tables]
         else:
@@ -85,41 +79,46 @@ class ConfluenceExtractor:
             print(f"Response status: {response.status_code}")
 
             if response.status_code != 200:
-                print(f"Failed to get page data: {response.status_code} - {response.text[:200]}")
+                print(
+                    f"Failed to get page data: {response.status_code} - {response.text[:200]}"
+                )
                 return base64_images
 
             page_data = response.json()
 
             # Extract attachments
             attachments = []
-            if 'children' in page_data and 'attachment' in page_data['children']:
-                attachments = page_data['children']['attachment'].get('results', [])
+            if "children" in page_data and "attachment" in page_data["children"]:
+                attachments = page_data["children"]["attachment"].get("results", [])
                 print(f"Found {len(attachments)} attachments")
             else:
                 print("No attachments found in page data")
                 return base64_images
 
-            if page_data and 'body' in page_data and 'storage' in page_data['body']:
+            if page_data and "body" in page_data and "storage" in page_data["body"]:
                 page_data = page_data
                 print(f"page data is {page_data}")
                 # Get the HTML content from body.storage.value
-                html_content = page_data['body']['storage']['value']
+                html_content = page_data["body"]["storage"]["value"]
 
                 # Parse the HTML content
-                soup = BeautifulSoup(html_content, 'lxml')
+                soup = BeautifulSoup(html_content, "lxml")
 
                 # Find all ri:attachment tags within ac:image tags
-                image_tags = soup.find_all('ri:attachment')
+                image_tags = soup.find_all("ri:attachment")
                 print(f"Found {len(image_tags)} image attachment references")
                 print(f"Image tags: {image_tags}")
 
                 # Process attachments (already retrieved above)
                 if attachments:
-                    attachment_map = {att['title']: att.get('_links', {}).get('download', '') for att in attachments}
+                    attachment_map = {
+                        att["title"]: att.get("_links", {}).get("download", "")
+                        for att in attachments
+                    }
                     print(f"attachment_map is {attachment_map}")
 
                     for img_tag in image_tags:
-                        filename = img_tag.get('ri:filename')
+                        filename = img_tag.get("ri:filename")
                         print(f"searching for filename {filename} in attachment_map")
                         if filename and filename in attachment_map:
                             dl_path = attachment_map[filename]
@@ -127,7 +126,9 @@ class ConfluenceExtractor:
 
                             try:
                                 print(f"Attempting download with URL: {download_url}")
-                                response = session.get(download_url, allow_redirects=True, timeout=30)
+                                response = session.get(
+                                    download_url, allow_redirects=True, timeout=30
+                                )
                                 print(f"Download status: {response.status_code}")
 
                                 if response.status_code == 200:
@@ -136,27 +137,37 @@ class ConfluenceExtractor:
                                     # Check image size - skip if too large for MongoDB (>15MB)
                                     image_size_mb = len(image_data) / (1024 * 1024)
                                     if image_size_mb > 15:
-                                        print(f"Skipping large image {filename}: {image_size_mb:.1f}MB\
-                                              (exceeds 15MB limit)")
+                                        print(
+                                            f"Skipping large image {filename}: {image_size_mb:.1f}MB\
+                                              (exceeds 15MB limit)"
+                                        )
                                         continue
 
                                     # Save the image file
                                     file_path = os.path.join(image_dir, filename)
-                                    with open(file_path, 'wb') as f:
+                                    with open(file_path, "wb") as f:
                                         f.write(image_data)
                                     print(f"Saved image to {file_path}")
 
-                                    base64_image = base64.b64encode(image_data).decode('utf-8')
-                                    base64_images.append({
-                                        'filename': filename,
-                                        'base64_data': base64_image
-                                    })
+                                    base64_image = base64.b64encode(image_data).decode(
+                                        "utf-8"
+                                    )
+                                    base64_images.append(
+                                        {
+                                            "filename": filename,
+                                            "base64_data": base64_image,
+                                        }
+                                    )
                                     print(f"Successfully downloaded image: {filename}")
                                 else:
-                                    print(f"Failed to download image {filename}.\
-                                          Final status: {response.status_code if response else 'No response'}")
+                                    print(
+                                        f"Failed to download image {filename}.\
+                                          Final status: {response.status_code if response else 'No response'}"
+                                    )
                                     if response:
-                                        print(f"Response headers: {dict(response.headers)}")
+                                        print(
+                                            f"Response headers: {dict(response.headers)}"
+                                        )
                                         print(f"Response text: {response.text[:500]}")
                             except Exception as e:
                                 print(f"Error downloading image {filename}: {str(e)}")
@@ -177,25 +188,26 @@ class ConfluenceExtractor:
     def extract_text_from_html(self, doc: Document) -> List[str]:
         """Extract text content from HTML"""
         html_content = doc.page_content
-        soup = BeautifulSoup(html_content, 'html.parser')
-        page_id = doc.metadata.get('page_id')
+        soup = BeautifulSoup(html_content, "html.parser")
+        page_id = doc.metadata.get("page_id")
         # Remove script and style elements
-        for element in soup(['script', 'style']):
+        for element in soup(["script", "style"]):
             element.decompose()
 
         # Get text and split into meaningful chunks
-        text = soup.get_text(separator=' ', strip=True)
+        text = soup.get_text(separator=" ", strip=True)
 
-        chunks = [chunk.strip()
-                  for chunk in text.split('\n\n') if chunk.strip()]
+        chunks = [chunk.strip() for chunk in text.split("\n\n") if chunk.strip()]
         final_text = ""
-        clean_chunks = [final_text+chunk for chunk in chunks]
+        clean_chunks = [final_text + chunk for chunk in chunks]
         if clean_chunks:
             return [{"page": page_id, "type": "text", "text": clean_chunks[0]}]
         else:
             return []
 
-    def get_child_pages(self, page_id: str, max_depth: int = 1, current_depth: int = 0) -> List[str]:
+    def get_child_pages(
+        self, page_id: str, max_depth: int = 1, current_depth: int = 0
+    ) -> List[str]:
         """Recursively get all child page IDs for a given page"""
         if current_depth >= max_depth:
             return []
@@ -210,20 +222,24 @@ class ConfluenceExtractor:
 
             if response.status_code == 200:
                 data = response.json()
-                children = data.get('results', [])
+                children = data.get("results", [])
 
                 logger.info(f"Found {len(children)} child pages for page {page_id}")
 
                 for child in children:
-                    child_id = child['id']
+                    child_id = child["id"]
                     child_page_ids.append(child_id)
                     logger.info(f"Found child page: {child['title']} (ID: {child_id})")
 
                     # Recursively get grandchildren
-                    grandchildren = self.get_child_pages(child_id, max_depth, current_depth + 1)
+                    grandchildren = self.get_child_pages(
+                        child_id, max_depth, current_depth + 1
+                    )
                     child_page_ids.extend(grandchildren)
             else:
-                logger.warning(f"Failed to get child pages for {page_id}: {response.status_code}")
+                logger.warning(
+                    f"Failed to get child pages for {page_id}: {response.status_code}"
+                )
 
         except Exception as e:
             logger.error(f"Error getting child pages for {page_id}: {str(e)}")
@@ -240,7 +256,9 @@ class ConfluenceExtractor:
         child_page_ids = self.get_child_pages(self.page_id)
         all_page_ids.extend(child_page_ids)
 
-        logger.info(f"Total pages to process: {len(all_page_ids)} (1 parent + {len(child_page_ids)} children)")
+        logger.info(
+            f"Total pages to process: {len(all_page_ids)} (1 parent + {len(child_page_ids)} children)"
+        )
 
         # Load all pages using ConfluenceLoader
         documents = self.loader.load(page_ids=all_page_ids)
@@ -270,30 +288,24 @@ class ConfluenceExtractor:
 
 
 def load_confluence_content(
-    confluence_url: str,
-    username: str,
-    api_key: str,
-    space_key: str,
-    page_id: str
+    confluence_url: str, username: str, api_key: str, space_key: str, page_id: str
 ):
     """Main function to load and process Confluence content"""
 
     # Initialize extractor
     extractor = ConfluenceExtractor(
-        confluence_url, username, api_key, space_key, page_id)
+        confluence_url, username, api_key, space_key, page_id
+    )
 
     # Extract content
     tables, images, texts = extractor.extract_data()
-    images = [img['base64_data'] for img in images]
+    images = [img["base64_data"] for img in images]
     # print("*****************************TEXTS EXTRACTED FROM PAGE ARE*******************************")
     # print(texts)
     # print("*****************************TEXTS EXTRACTED FROM PAGE ARE*******************************")
     # Initialize LLM
     model = LLMFactory.create_llm(
-        provider="ollama",
-        model_name="llama3:8b",
-        model_type="chat",
-        temperature=0.5
+        provider="ollama", model_name="llama3:8b", model_type="chat", temperature=0.5
     )
 
     # Define prompts
@@ -318,15 +330,11 @@ def load_confluence_content(
 
     # Create chains
     text_table_chain = (
-        ChatPromptTemplate.from_template(text_table_prompt)
-        | model
-        | StrOutputParser()
+        ChatPromptTemplate.from_template(text_table_prompt) | model | StrOutputParser()
     )
 
     image_chain = (
-        ChatPromptTemplate.from_template(image_prompt)
-        | model
-        | StrOutputParser()
+        ChatPromptTemplate.from_template(image_prompt) | model | StrOutputParser()
     )
 
     # get text from extracted texts
@@ -347,8 +355,7 @@ def load_confluence_content(
 
     if processed_texts:
         logger.info("Starting text summarization")
-        text_summaries = text_table_chain.batch(
-            processed_texts, {"max_concurrency": 3})
+        text_summaries = text_table_chain.batch(processed_texts, {"max_concurrency": 3})
     else:
         logger.info("No text content found to summarize")
 
@@ -428,5 +435,5 @@ if __name__ == "__main__":
         username=USERNAME,
         api_key=API_KEY,
         space_key=SPACE_KEY,
-        page_id=PAGE_ID
+        page_id=PAGE_ID,
     )

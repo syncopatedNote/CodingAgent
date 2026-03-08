@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   # Supervisor Agent API Service
@@ -12,87 +11,46 @@ services:
     environment:
       # LLM Configuration
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
       LLM_PROVIDER: ${LLM_PROVIDER:-litellm}
       LLM_MODEL_NAME: ${LLM_MODEL_NAME:-gpt-4o-mini}
       LLM_MODEL_TYPE: ${LLM_MODEL_TYPE:-chat}
-      
+
+      # LangSmith Tracing
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT}
+
       # AWS Bedrock Configuration (if using Bedrock)
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_REGION: ${AWS_REGION:-us-east-1}
-      
+
       # Enterprise Integrations
       CONFLUENCE_URL: ${CONFLUENCE_URL}
       CONFLUENCE_USERNAME: ${CONFLUENCE_USERNAME}
       CONFLUENCE_API_TOKEN: ${CONFLUENCE_API_TOKEN}
       CONFLUENCE_SSL_VERIFY: ${CONFLUENCE_SSL_VERIFY:-false}
-      
+
       JIRA_URL: ${JIRA_URL}
       JIRA_PERSONAL_TOKEN: ${JIRA_PERSONAL_TOKEN}
       JIRA_SSL_VERIFY: ${JIRA_SSL_VERIFY:-false}
-      
+
       GITLAB_PERSONAL_ACCESS_TOKEN: ${GITLAB_PERSONAL_ACCESS_TOKEN}
       GITLAB_API_URL: ${GITLAB_API_URL}
       GITLAB_PROJECT_ID: ${GITLAB_PROJECT_ID}
-      
+
       # MCP Configuration
       MCP_VERY_VERBOSE: ${MCP_VERY_VERBOSE:-true}
-      
+
       # MCP Server URLs (for SSE transport)
       MCP_ATLASSIAN_URL: http://mcp-atlassian:3000
-      MCP_GITLAB_URL: http://mcp-gitlab:3001
+      MCP_GITLAB_URL: http://mcp-gitlab:3002
+      # MCP_GITHUB_URL: Not used - GitHub uses stdio transport
     volumes:
       - ./:/app
       - chroma_db:/app/chroma_db
-    depends_on:
-      - mongodb
-      - mcp-atlassian
-      - mcp-gitlab
-    networks:
-      - supervisor-network
-    restart: unless-stopped
-
-  # Streamlit UI Service
-  streamlit-ui:
-    build:
-      context: .
-      dockerfile: dockerfile.streamlit
-    container_name: supervisor-agent-ui
-    ports:
-      - "8501:8501"
-    environment:
-      # Same environment variables as API
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      LLM_PROVIDER: ${LLM_PROVIDER:-litellm}
-      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-gpt-4o-mini}
-      LLM_MODEL_TYPE: ${LLM_MODEL_TYPE:-chat}
-      
-      CONFLUENCE_URL: ${CONFLUENCE_URL}
-      CONFLUENCE_USERNAME: ${CONFLUENCE_USERNAME}
-      CONFLUENCE_API_TOKEN: ${CONFLUENCE_API_TOKEN}
-      CONFLUENCE_SSL_VERIFY: ${CONFLUENCE_SSL_VERIFY:-false}
-      
-      JIRA_URL: ${JIRA_URL}
-      JIRA_PERSONAL_TOKEN: ${JIRA_PERSONAL_TOKEN}
-      JIRA_SSL_VERIFY: ${JIRA_SSL_VERIFY:-false}
-      
-      GITLAB_PERSONAL_ACCESS_TOKEN: ${GITLAB_PERSONAL_ACCESS_TOKEN}
-      GITLAB_API_URL: ${GITLAB_API_URL}
-      GITLAB_PROJECT_ID: ${GITLAB_PROJECT_ID}
-      
-      MCP_VERY_VERBOSE: ${MCP_VERY_VERBOSE:-true}
-      
-      # Ollama configuration (if using local ollama)
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      
-      # MCP Server URLs (for SSE transport)
-      MCP_ATLASSIAN_URL: http://mcp-atlassian:3000
-      MCP_GITLAB_URL: http://mcp-gitlab:3001
-    volumes:
-      - chroma_db:/app/chroma_db
-      # Don't mount logs directory to prevent inotify loop
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
       - mongodb
       - mcp-atlassian
@@ -122,24 +80,23 @@ services:
     image: ghcr.io/sooperset/mcp-atlassian:latest
     container_name: mcp-atlassian-server
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
-      MCP_VERY_VERBOSE: ${MCP_VERY_VERBOSE:-true}
       CONFLUENCE_URL: ${CONFLUENCE_URL}
       CONFLUENCE_USERNAME: ${CONFLUENCE_USERNAME}
       CONFLUENCE_API_TOKEN: ${CONFLUENCE_API_TOKEN}
       CONFLUENCE_SSL_VERIFY: ${CONFLUENCE_SSL_VERIFY:-false}
       JIRA_URL: ${JIRA_URL}
+      JIRA_USERNAME: ${JIRA_USERNAME:-}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
       JIRA_PERSONAL_TOKEN: ${JIRA_PERSONAL_TOKEN}
       JIRA_SSL_VERIFY: ${JIRA_SSL_VERIFY:-false}
-      # MCP SSE server configuration
-      PORT: 3000
-      TRANSPORT: sse
+    command: --transport streamable-http --port 3000 -vv
     networks:
       - supervisor-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/mcp"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -147,26 +104,24 @@ services:
 
   # MCP GitLab Server - Persistent Service
   mcp-gitlab:
-    image: iwakitakuma/gitlab-mcp:latest
+    image: zereight050/gitlab-mcp:latest
     container_name: mcp-gitlab-server
     ports:
-      - "3001:3001"
+      - "3333:3002"
     environment:
-      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+      HOST: 0.0.0.0
       GITLAB_PERSONAL_ACCESS_TOKEN: ${GITLAB_PERSONAL_ACCESS_TOKEN}
       GITLAB_API_URL: ${GITLAB_API_URL}
       GITLAB_READ_ONLY_MODE: "false"
       USE_GITLAB_WIKI: "true"
       USE_MILESTONE: "true"
       USE_PIPELINE: "true"
-      # MCP SSE server configuration
-      PORT: 3001
-      TRANSPORT: sse
+      # SSE: "true"
     networks:
       - supervisor-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/health"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3002/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -201,6 +156,5 @@ networks:
 # 1. Create .env file with necessary environment variables
 # 2. Run: docker-compose up -d
 # 3. API available at http://localhost:8000
-# 4. Streamlit UI available at http://localhost:8501
-# 5. MongoDB Express available at http://localhost:8081
-# 6. Logs: docker-compose logs -f supervisor-api
+# 4. MongoDB Express available at http://localhost:8081
+# 5. Logs: docker-compose logs -f supervisor-api

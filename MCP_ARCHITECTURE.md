@@ -88,7 +88,9 @@ multi_server_mcp_client = MultiServerMCPClient({
 ```
 User Request
     ↓
-Streamlit UI Container
+Agent UI (Next.js)
+    ↓
+Supervisor API (FastAPI)
     ↓
 SupervisorAgent
     ↓
@@ -111,7 +113,9 @@ Response flows back to user
 ```
 User Request
     ↓
-Streamlit UI Container
+Agent UI (Next.js)
+    ↓
+Supervisor API (FastAPI)
     ↓
 SupervisorAgent
     ↓
@@ -179,7 +183,7 @@ For production deployments, **always use SSE transport**:
 
 **Cause**: MCP service not running or wrong URL
 
-**Fix**: 
+**Fix**:
 ```bash
 # Check if MCP services are running
 docker compose ps

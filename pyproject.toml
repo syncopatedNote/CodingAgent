@@ -1,0 +1,40 @@
+# Configuration for Python tools
+
+[tool.black]
+line-length = 88
+target-version = ['py313']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | venv
+  | _build
+  | buck-out
+  | build
+  | dist
+  | __pycache__
+)/
+'''
+
+[tool.bandit]
+# Skip test directories and common false positives
+exclude_dirs = [
+    "tests",
+    "test",
+    ".venv",
+    "venv",
+    "__pycache__"
+]
+skips = [
+    "B101",  # assert_used - asserts are OK in tests
+    "B601",  # paramiko_calls - we may need SSH
+]
+
+[tool.bandit.assert_used]
+skips = ['*_test.py', '*/test_*.py', '*/tests/*']

@@ -1,0 +1,73 @@
+# Pre-commit hooks for security and code quality
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Detect secrets like passwords, API keys, tokens
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args:
+          - '--baseline'
+          - '.secrets.baseline'
+        exclude: |
+          (?x)^(
+            .*\.lock|
+            .*\.min\.js|
+            package-lock\.json|
+            poetry\.lock|
+            Pipfile\.lock
+          )$
+
+  # General pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      # Prevent committing large files
+      - id: check-added-large-files
+        args: ['--maxkb=10000']
+
+      # Prevent committing to main/master
+      - id: no-commit-to-branch
+        args: ['--branch', 'main', '--branch', 'master']
+
+      # Check for files that would conflict in case-insensitive filesystems
+      - id: check-case-conflict
+
+      # Ensure files end with newline
+      - id: end-of-file-fixer
+        exclude: '\.svg$'
+
+      # Check for merge conflict markers
+      - id: check-merge-conflict
+
+      # Check YAML syntax
+      - id: check-yaml
+        args: ['--unsafe']  # Allow custom YAML tags
+
+      # Check JSON syntax
+      - id: check-json
+
+      # Check for private keys
+      - id: detect-private-key
+
+      # Trim trailing whitespace
+      - id: trailing-whitespace
+        args: ['--markdown-linebreak-ext=md']
+
+  # Python-specific hooks
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        exclude: '^(\.venv|venv|env)'
+
+  # Check for common security issues in Python code
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.8.0
+    hooks:
+      - id: bandit
+        args: ['-c', 'pyproject.toml']
+        additional_dependencies: ['bandit[toml]']
+        exclude: '^(tests?/|\.venv/|venv/)'

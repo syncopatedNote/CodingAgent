@@ -11,7 +11,7 @@ class MongoDocStore(BaseStore[str, Dict[str, Any]]):
         self,
         database: str = "langchain_db",
         collection_name: str = "documents",
-        mongodb_uri: str = "mongodb://127.0.0.1:27017"
+        mongodb_uri: str = "mongodb://127.0.0.1:27017",
     ):
         """Initialize with both sync and async clients."""
         # Sync client for MultiVectorRetriever
@@ -50,9 +50,13 @@ class MongoDocStore(BaseStore[str, Dict[str, Any]]):
                     result.append(doc)
                 else:
                     result.append(None)
-            print("************************DOCSTORE RESPONSE FOR MULTIVECTOR RETRIEVER******************************")
+            print(
+                "************************DOCSTORE RESPONSE FOR MULTIVECTOR RETRIEVER******************************"
+            )
             print(result)
-            print("************************DOCSTORE RESPONSE FOR MULTIVECTOR RETRIEVER******************************")
+            print(
+                "************************DOCSTORE RESPONSE FOR MULTIVECTOR RETRIEVER******************************"
+            )
 
             return result
 
@@ -159,10 +163,7 @@ class DocStoreClient:
         self.mongodb_uri = "mongodb://127.0.0.1:27017"
         self._docstore = None
 
-    def get_docstore(
-        self,
-        collection_name: Optional[str] = None
-    ) -> MongoDocStore:
+    def get_docstore(self, collection_name: Optional[str] = None) -> MongoDocStore:
         """
         Get or create a MongoDB document store instance.
 
@@ -179,7 +180,7 @@ class DocStoreClient:
             self._docstore = MongoDocStore(
                 database=self.database_name,
                 collection_name=self.collection_name,
-                mongodb_uri=self.mongodb_uri
+                mongodb_uri=self.mongodb_uri,
             )
 
         return self._docstore
@@ -195,9 +196,7 @@ class DocStoreClient:
 _docstore_client = None
 
 
-def get_document_store(
-    collection_name: Optional[str] = None
-) -> MongoDocStore:
+def get_document_store(collection_name: Optional[str] = None) -> MongoDocStore:
     """
     Get a MongoDB document store instance.
 

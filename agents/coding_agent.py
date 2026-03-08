@@ -12,12 +12,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from framework_base.llm_base import LLMFactory
 from settings import settings
 
-from .components import (
-    JiraHandler,
-    ConfluenceHandler,
-    CodeGenerator,
-    GitLabHandler
-)
+from .components import JiraHandler, ConfluenceHandler, CodeGenerator, GitLabHandler
 
 
 # State definition for maintaining workflow context
@@ -83,37 +78,21 @@ class CodingAgent:
         # Add nodes using component methods
         workflow.add_node("fetch_jira_ticket", self.jira_handler.fetch_ticket)
         workflow.add_node(
-            "extract_confluence_link",
-            self.confluence_handler.extract_confluence_link
+            "extract_confluence_link", self.confluence_handler.extract_confluence_link
         )
         workflow.add_node(
-            "fetch_confluence_design",
-            self.confluence_handler.fetch_design_content
+            "fetch_confluence_design", self.confluence_handler.fetch_design_content
         )
         workflow.add_node(
-            "load_development_rules",
-            self.gitlab_handler.load_development_rules
+            "load_development_rules", self.gitlab_handler.load_development_rules
         )
+        workflow.add_node("generate_code", self.code_generator.generate_code)
+        workflow.add_node("reflect_code", self.code_generator.reflect_code)
         workflow.add_node(
-            "generate_code",
-            self.code_generator.generate_code
+            "create_gitlab_branch", self.gitlab_handler.create_branch_and_commit
         )
-        workflow.add_node(
-            "reflect_code",
-            self.code_generator.reflect_code
-        )
-        workflow.add_node(
-            "create_gitlab_branch",
-            self.gitlab_handler.create_branch_and_commit
-        )
-        workflow.add_node(
-            "commit_code",
-            self.gitlab_handler.commit_code
-        )
-        workflow.add_node(
-            "handle_error",
-            self._handle_error
-        )
+        workflow.add_node("commit_code", self.gitlab_handler.commit_code)
+        workflow.add_node("handle_error", self._handle_error)
 
         workflow.set_entry_point("fetch_jira_ticket")
         return workflow.compile()
@@ -199,7 +178,7 @@ class CodingAgent:
 
                 Summary:
                 - Jira ticket: ✓ Fetched
-                - Confluence design: ✓ Fetched  
+                - Confluence design: ✓ Fetched
                 - Development rules: ✓ Loaded
                 - Code generation: ✓ Completed
                 - Code reflection: ✓ Completed ({reflection_count} reflection cycles)

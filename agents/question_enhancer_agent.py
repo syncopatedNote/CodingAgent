@@ -90,7 +90,7 @@ def enhance_node(state: AgentState) -> AgentState:
     response = llm.invoke([HumanMessage(content=enhancement_prompt)])
 
     # Handle both string responses and message objects
-    if hasattr(response, 'content'):
+    if hasattr(response, "content"):
         enhanced_text = response.content
     else:
         enhanced_text = str(response)
