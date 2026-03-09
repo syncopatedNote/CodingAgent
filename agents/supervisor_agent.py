@@ -6,6 +6,7 @@ Has only two main responsibilities:
 2. Route to search agent for all search operations
 3. Support general chit chat
 """
+
 import re
 from typing import Dict, List, Optional, TypedDict, Annotated
 from enum import Enum
@@ -14,11 +15,14 @@ from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from framework_base.llm_base import LLMFactory
 from settings import settings
+from logger import setup_logger
 
 # Import agents
 from .search_agent import SearchAgent
 from .coding_agent import CodingAgent
 from .question_enhancer_agent import enhance_question
+
+logger = setup_logger(__name__)
 
 
 class TaskType(Enum):
@@ -156,7 +160,7 @@ class SupervisorAgent:
 
         return state
 
-    def _classify_task(self, state: SupervisorState) -> SupervisorState:
+    async def _classify_task(self, state: SupervisorState) -> SupervisorState:
         """Classify the user's task into one of two main categories"""
         try:
             user_input = state["user_input"]
@@ -166,7 +170,9 @@ class SupervisorAgent:
             state["extracted_jira_tickets"] = jira_tickets
 
             # Simple classification based on keywords and patterns
-            task_type, confidence = self._classify_task_simple(user_input, jira_tickets)
+            task_type, confidence = await self._classify_task_simple(
+                user_input, jira_tickets
+            )
 
             state["task_type"] = task_type
             state["confidence"] = confidence
@@ -181,7 +187,9 @@ class SupervisorAgent:
         jira_pattern = r"\b[A-Z]+-\d+\b"
         return re.findall(jira_pattern, text)
 
-    def _classify_task_simple(self, user_input: str, jira_tickets: List[str]) -> tuple:
+    async def _classify_task_simple(
+        self, user_input: str, jira_tickets: List[str]
+    ) -> tuple:
         """Use LLM to intelligently classify the user's intent"""
 
         jira_context = ""
@@ -214,7 +222,9 @@ class SupervisorAgent:
         """
 
         try:
-            response = self.llm.invoke([HumanMessage(content=classification_prompt)])
+            response = await self.llm.ainvoke(
+                [HumanMessage(content=classification_prompt)]
+            )
             result = response.content.strip()
 
             # Parse the LLM response
@@ -241,7 +251,9 @@ class SupervisorAgent:
 
         except Exception as e:
             # Fallback to general chat if LLM classification fails
-            print(f"LLM classification failed: {e}, falling back to GENERAL_CHAT")
+            logger.exception(
+                f"LLM classification failed: {e}, falling back to GENERAL_CHAT"
+            )
             return TaskType.GENERAL_CHAT, 0.5
 
     async def _invoke_search_agent(self, state: SupervisorState) -> SupervisorState:

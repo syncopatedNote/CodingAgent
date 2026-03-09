@@ -79,7 +79,7 @@ class GitLabHandler:
 
                         except Exception:
                             logger.exception(
-                                "Exception occured while extracting development rules."
+                                "Exception occurred while extracting development rules."
                             )
 
                 if md_files_content:
