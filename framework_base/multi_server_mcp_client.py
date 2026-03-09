@@ -39,8 +39,6 @@ def _build_client_config() -> dict:
 
 
 # Initialize the multi-server MCP client with discovered and enabled servers
-_config = _build_client_config()
-
 multi_server_mcp_client = MultiServerMCPClient(_build_client_config())
 
 

@@ -31,7 +31,7 @@ class MCPServerConfig(BaseModel, ABC):
         None, description="Command to execute (e.g., 'npx', 'docker')"
     )
     args: Optional[List[str]] = Field(
-        default=[], description="Arguments for the command"
+        default_factory=list, description="Arguments for the command"
     )
     env: Optional[Dict[str, str]] = Field(
         None, description="Environment variables for stdio transport"
@@ -50,11 +50,16 @@ class MCPServerConfig(BaseModel, ABC):
 
     def get_streamable_http_config(self) -> Dict:
         """Get configuration for streamable HTTP transport"""
+        url = ""
         if not self.http_url:
             raise ValueError(f"Streamable HTTP not supported for server: {self.name}")
         if self.http_port:
-            self.http_url = self.http_url + f":{self.http_port}"
-        return {"url": f"{self.http_url}/mcp", "transport": "streamable_http"}
+            url = self.http_url + f":{self.http_port}"
+        else:
+            url = self.http_url
+        if not url:
+            raise Exception("Not able to set http url for streamable http config")
+        return {"url": f"{url}/mcp", "transport": "streamable_http"}
 
     def get_stdio_config(self) -> Dict:
         """Get configuration for stdio transport"""

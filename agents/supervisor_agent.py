@@ -6,6 +6,7 @@ Has only two main responsibilities:
 2. Route to search agent for all search operations
 3. Support general chit chat
 """
+
 import re
 from typing import Dict, List, Optional, TypedDict, Annotated
 from enum import Enum
@@ -241,7 +242,6 @@ class SupervisorAgent:
 
         except Exception as e:
             # Fallback to general chat if LLM classification fails
-            print(f"LLM classification failed: {e}, falling back to GENERAL_CHAT")
             return TaskType.GENERAL_CHAT, 0.5
 
     async def _invoke_search_agent(self, state: SupervisorState) -> SupervisorState:

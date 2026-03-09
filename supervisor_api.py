@@ -167,7 +167,7 @@ def extract_response_data(
             final_response = f"I encountered an error: {error_msg}"
         else:
             final_response = (
-                "I'm sorry, I couldn't generate a response."
+                "I'm sorry, I couldn't generate a response. "
                 "Please try rephrasing your question."
             )
 
@@ -371,4 +371,4 @@ if __name__ == "__main__":
     import uvicorn
 
     # Run the API server
-    uvicorn.run(app, host="127.0.0.0", port=8000, log_level="info", reload=True)
+    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info", reload=True)

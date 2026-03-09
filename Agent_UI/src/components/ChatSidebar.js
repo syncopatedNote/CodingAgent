@@ -151,14 +151,6 @@ export default function ChatSidebar({ isOpen, onClose, onNewChat, onSelectExampl
             >
               Swagger <ExternalLink className="w-3 h-3" />
             </a>
-            <a
-              href="http://localhost:8501"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-[11px] text-muted hover:text-foreground hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
-            >
-              Streamlit <ExternalLink className="w-3 h-3" />
-            </a>
           </div>
         </div>
       </aside>
