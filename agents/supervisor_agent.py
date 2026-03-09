@@ -15,11 +15,14 @@ from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from framework_base.llm_base import LLMFactory
 from settings import settings
+from logger import setup_logger
 
 # Import agents
 from .search_agent import SearchAgent
 from .coding_agent import CodingAgent
 from .question_enhancer_agent import enhance_question
+
+logger = setup_logger(__name__)
 
 
 class TaskType(Enum):
@@ -242,6 +245,9 @@ class SupervisorAgent:
 
         except Exception as e:
             # Fallback to general chat if LLM classification fails
+            logger.exception(
+                f"LLM classification failed: {e}, falling back to GENERAL_CHAT"
+            )
             return TaskType.GENERAL_CHAT, 0.5
 
     async def _invoke_search_agent(self, state: SupervisorState) -> SupervisorState:
