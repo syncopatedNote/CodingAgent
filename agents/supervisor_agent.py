@@ -160,7 +160,7 @@ class SupervisorAgent:
 
         return state
 
-    def _classify_task(self, state: SupervisorState) -> SupervisorState:
+    async def _classify_task(self, state: SupervisorState) -> SupervisorState:
         """Classify the user's task into one of two main categories"""
         try:
             user_input = state["user_input"]
@@ -170,7 +170,9 @@ class SupervisorAgent:
             state["extracted_jira_tickets"] = jira_tickets
 
             # Simple classification based on keywords and patterns
-            task_type, confidence = self._classify_task_simple(user_input, jira_tickets)
+            task_type, confidence = await self._classify_task_simple(
+                user_input, jira_tickets
+            )
 
             state["task_type"] = task_type
             state["confidence"] = confidence
@@ -185,7 +187,9 @@ class SupervisorAgent:
         jira_pattern = r"\b[A-Z]+-\d+\b"
         return re.findall(jira_pattern, text)
 
-    def _classify_task_simple(self, user_input: str, jira_tickets: List[str]) -> tuple:
+    async def _classify_task_simple(
+        self, user_input: str, jira_tickets: List[str]
+    ) -> tuple:
         """Use LLM to intelligently classify the user's intent"""
 
         jira_context = ""
@@ -218,7 +222,9 @@ class SupervisorAgent:
         """
 
         try:
-            response = self.llm.invoke([HumanMessage(content=classification_prompt)])
+            response = await self.llm.ainvoke(
+                [HumanMessage(content=classification_prompt)]
+            )
             result = response.content.strip()
 
             # Parse the LLM response
