@@ -148,13 +148,14 @@ export default function Home() {
       // AG-UI INTERRUPT → agent paused, awaiting user input
       onInterrupt: (interrupt) => {
         setPendingInterrupt(interrupt);
+        const question = interrupt?.payload?.question || `Agent needs input (${interrupt.reason})`;
         setMessages((prev) => {
           const updated = [...prev];
           const last = updated[updated.length - 1];
           if (last && last.role === "assistant") {
             updated[updated.length - 1] = {
               ...last,
-              content: last.content || `⏸ Action requires approval: ${interrupt.reason}`,
+              content: last.content || question,
               isStreaming: false,
               interrupt,
             };
@@ -194,6 +195,22 @@ export default function Home() {
     if (!pendingInterrupt) return;
 
     const interruptId = pendingInterrupt.id;
+    const answer = extra.answer || "";
+
+    // Add the user's answer as a visible message and clear interrupt from the message
+    if (answer) {
+      setMessages((prev) => {
+        const updated = prev.map((m) =>
+          m.interrupt ? { ...m, interrupt: undefined } : m
+        );
+        return [...updated, { role: "user", content: answer }];
+      });
+    } else {
+      setMessages((prev) =>
+        prev.map((m) => (m.interrupt ? { ...m, interrupt: undefined } : m))
+      );
+    }
+
     setPendingInterrupt(null);
     setIsLoading(true);
 
@@ -264,13 +281,14 @@ export default function Home() {
         onInterrupt: (interrupt) => {
           // Nested interrupt (rare but possible)
           setPendingInterrupt(interrupt);
+          const question = interrupt?.payload?.question || `Agent needs input (${interrupt.reason})`;
           setMessages((prev) => {
             const updated = [...prev];
             const last = updated[updated.length - 1];
             if (last && last.role === "assistant") {
               updated[updated.length - 1] = {
                 ...last,
-                content: last.content || `⏸ Action requires approval: ${interrupt.reason}`,
+                content: last.content || question,
                 isStreaming: false,
                 interrupt,
               };
@@ -401,12 +419,28 @@ export default function Home() {
 
         {/* Input — always pinned at bottom */}
         <div className="shrink-0">
-          <ChatInput
-            value={input}
-            onChange={setInput}
-            onSend={() => sendMessage()}
-            isLoading={isLoading}
-          />
+          {pendingInterrupt ? (
+            <ChatInput
+              value={input}
+              onChange={setInput}
+              onSend={() => {
+                const answer = input.trim();
+                if (answer) {
+                  setInput("");
+                  handleResumeInterrupt(true, { answer });
+                }
+              }}
+              isLoading={isLoading}
+              placeholder="Type your answer..."
+            />
+          ) : (
+            <ChatInput
+              value={input}
+              onChange={setInput}
+              onSend={() => sendMessage()}
+              isLoading={isLoading}
+            />
+          )}
         </div>
       </div>
     </div>

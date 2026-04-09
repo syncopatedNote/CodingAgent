@@ -41,6 +41,7 @@ services:
 
       # LiteLLM Proxy URL (if using local LiteLLM service)
       LITELLM_PROXY_URL: ${LITELLM_PROXY_URL:-http://litellm:4000}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-1234}
 
       # LangSmith Tracing
       LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}

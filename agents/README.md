@@ -183,7 +183,7 @@ python test_supervisor_integration.py
 ### 2. Start the API Server
 
 ```bash
-uvicorn supervisor_api:app --host 0.0.0.0 --port 8000 --reload
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ## Development Guidelines

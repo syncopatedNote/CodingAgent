@@ -1,26 +1,20 @@
-#!/usr/bin/env python3
 """
-Supervisor Agent API Service
-Exposes the supervisor agent as a REST API service for
-external frontend integrations.
-Built with FastAPI and Uvicorn.
-
-Usage:
-    uvicorn supervisor_api:app --host 0.0.0.0 --port 8000 --reload
+Supervisor Agent Routes
+Endpoints for interacting with the supervisor agent.
 """
 
-from contextlib import asynccontextmanager
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+
 from pydantic import BaseModel, Field
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Request
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from ag_ui.core import RunAgentInput
 from ag_ui_middleware import (
     AgUIMiddleware,
     AgentResult,
+    InterruptData,
+    InterruptReason,
     RunContext,
 )
 from agents.supervisor_agent import SupervisorAgent, TaskType
@@ -45,15 +39,9 @@ def initialize_agent():
         raise
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Lifespan context manager for startup and shutdown events"""
-    # Startup
-    initialize_agent()
-    logger.info("Supervisor API service started")
-    yield
-    # Shutdown
-    logger.info("Supervisor API service shutting down")
+def get_supervisor_agent() -> Optional[SupervisorAgent]:
+    """Return the current supervisor agent instance (live reference)."""
+    return supervisor_agent
 
 
 # ==================== Pydantic Models ====================
@@ -107,35 +95,6 @@ class SupervisorResponse(BaseModel):
     timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
 
 
-class HealthCheckResponse(BaseModel):
-    """Health check response"""
-
-    status: str = Field(..., description="Service status")
-    message: str = Field(..., description="Status message")
-    timestamp: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
-
-
-# ==================== FastAPI Setup ====================
-
-app = FastAPI(
-    title="Supervisor Agent API",
-    description="REST API for the Supervisor Agent",
-    version="1.0.0",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    openapi_url="/api/openapi.json",
-    lifespan=lifespan,
-)
-
-# Add CORS middleware to allow requests from other frontend projects
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict to specific origins
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # ==================== Utility Functions ====================
 
 
@@ -159,7 +118,6 @@ def extract_response_data(
         task_type.value if isinstance(task_type, TaskType) else str(task_type)
     )
 
-    # Get final response or use error message as fallback
     final_response = state.get("final_response")
     if final_response is None:
         error_msg = state.get("error_message")
@@ -186,28 +144,12 @@ def extract_response_data(
     )
 
 
-# ==================== API Endpoints ====================
+# ==================== Router ====================
+
+router = APIRouter(prefix="/api/supervisor", tags=["Supervisor"])
 
 
-@app.get("/api/health", response_model=HealthCheckResponse, tags=["Health"])
-async def health_check():
-    """
-    Health check endpoint to verify API is running
-
-    Returns:
-        HealthCheckResponse with status information
-    """
-    return HealthCheckResponse(
-        status="healthy" if supervisor_agent else "initializing",
-        message=(
-            "Supervisor API is running" if supervisor_agent else "Agent is initializing"
-        ),
-    )
-
-
-@app.post(
-    "/api/supervisor/chat", response_model=SupervisorResponse, tags=["Supervisor"]
-)
+@router.post("/chat", response_model=SupervisorResponse)
 async def supervisor_chat(request: SupervisorRequest) -> SupervisorResponse:
     """
     Send a query to the supervisor agent for intelligent routing and response.
@@ -217,17 +159,6 @@ async def supervisor_chat(request: SupervisorRequest) -> SupervisorResponse:
     2. Classify the task type (search, code generation, or general chat)
     3. Route to the appropriate agent (search or coding)
     4. Return a structured response
-
-    Args:
-        request: SupervisorRequest containing user input and optional
-        conversation history
-
-    Returns:
-        SupervisorResponse with task analysis and final response
-
-    Raises:
-        HTTPException: If the supervisor agent is not initialized
-        or encounters an error
     """
     if not supervisor_agent:
         raise HTTPException(
@@ -236,30 +167,26 @@ async def supervisor_chat(request: SupervisorRequest) -> SupervisorResponse:
         )
 
     try:
-        # Convert conversation history to LangChain format
         conversation_history = []
         if request.conversation_history:
             conversation_history = convert_messages_to_langchain(
                 request.conversation_history
             )
 
-        # Run the supervisor agent
         logger.info(f"Processing user input: {request.user_input[:100]}...")
         final_state = await supervisor_agent.run(
             user_input=request.user_input, conversation_history=conversation_history
         )
 
-        # Debug logging
         logger.info(f"Final state keys: {final_state.keys()}")
         logger.info(f"final_response value: {final_state.get('final_response')}")
         logger.info(f"error_message value: {final_state.get('error_message')}")
 
-        # Extract and structure the response
         response = extract_response_data(final_state, session_id=request.session_id)
         response.session_id = request.session_id
 
         logger.info(
-            "Successfully processed request."
+            "Successfully processed request. "
             f"Task type: {response.task_analysis.task_type}"
         )
         return response
@@ -271,7 +198,7 @@ async def supervisor_chat(request: SupervisorRequest) -> SupervisorResponse:
         )
 
 
-@app.post("/api/supervisor/agent", tags=["Supervisor"])
+@router.post("/agent")
 async def supervisor_agent_endpoint(input_data: RunAgentInput, request: Request):
     """
     AG-UI protocol endpoint for the supervisor agent.
@@ -290,21 +217,58 @@ async def supervisor_agent_endpoint(input_data: RunAgentInput, request: Request)
         conversation_history: list[BaseMessage],
         context: RunContext,
     ) -> AgentResult:
-        """
-        Thin wrapper that calls the supervisor agent
-        and returns an :class:`AgentResult`.
-        """
+        if context.is_resume:
+            saved = context.saved_state or {}
+            coding_thread_id = saved.get("coding_thread_id")
+            answer = (
+                context.resume_data.payload.get("answer", "")
+                if context.resume_data
+                else ""
+            )
+
+            result = await supervisor_agent.coding_agent.run(
+                user_input=user_input,
+                thread_id=coding_thread_id,
+                resume_value=answer,
+            )
+
+            if result.get("interrupt"):
+                return AgentResult(
+                    interrupt=InterruptData(
+                        id=f"int-{result['thread_id'][:8]}",
+                        reason=InterruptReason.INFO_REQUIRED,
+                        payload=result["interrupt"],
+                    ),
+                    state_to_save={"coding_thread_id": result["thread_id"]},
+                )
+
+            return AgentResult(
+                response=result.get("response", ""),
+                metadata={"task_type": "code_generation"},
+            )
+
         final_state = await supervisor_agent.run(
             user_input=user_input,
             conversation_history=conversation_history,
         )
-        response_data = extract_response_data(final_state)
 
+        coding_result = final_state.get("coding_agent_result")
+        if coding_result and coding_result.get("interrupt"):
+            return AgentResult(
+                interrupt=InterruptData(
+                    id=f"int-{coding_result['thread_id'][:8]}",
+                    reason=InterruptReason.INFO_REQUIRED,
+                    payload=coding_result["interrupt"],
+                ),
+                state_to_save={"coding_thread_id": coding_result["thread_id"]},
+            )
+
+        response_data = extract_response_data(final_state)
         return AgentResult(
             response=response_data.response,
             metadata={
-                "task_type": (response_data.task_analysis.task_type),
-                "confidence": (response_data.task_analysis.confidence),
+                "task_type": response_data.task_analysis.task_type,
+                "confidence": response_data.task_analysis.confidence,
                 "extracted_jira_tickets": (
                     response_data.task_analysis.extracted_jira_tickets
                 ),
@@ -312,63 +276,3 @@ async def supervisor_agent_endpoint(input_data: RunAgentInput, request: Request)
         )
 
     return ag_ui.create_response(input_data, request, agent_fn=_agent_fn)
-
-
-# ==================== Error Handlers ====================
-
-
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
-    """Custom handler for HTTP exceptions"""
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": True,
-            "message": exc.detail,
-            "timestamp": datetime.utcnow().isoformat(),
-        },
-    )
-
-
-@app.exception_handler(Exception)
-async def general_exception_handler(request, exc):
-    """Custom handler for general exceptions"""
-    logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": True,
-            "message": "Internal server error",
-            "timestamp": datetime.utcnow().isoformat(),
-        },
-    )
-
-
-# ==================== Root Endpoint ====================
-
-
-@app.get("/", tags=["Root"])
-async def root():
-    """
-    Root endpoint with API information and links to documentation
-    """
-    return {
-        "name": "Supervisor Agent API",
-        "version": "1.0.0",
-        "documentation": "/api/docs",
-        "redoc": "/api/redoc",
-        "endpoints": {
-            "health": "/api/health",
-            "supervisor_chat": "/api/supervisor/chat",
-            "supervisor_agent": "/api/supervisor/agent",
-        },
-    }
-
-
-# ==================== Entry Point ====================
-
-if __name__ == "__main__":
-    import uvicorn
-
-    # Run the API server
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info", reload=True)

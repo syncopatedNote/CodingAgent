@@ -3,7 +3,7 @@
 import { useRef, useEffect } from "react";
 import { Send, Loader2 } from "lucide-react";
 
-export default function ChatInput({ value, onChange, onSend, isLoading }) {
+export default function ChatInput({ value, onChange, onSend, isLoading, placeholder = "Send a message..." }) {
   const textareaRef = useRef(null);
 
   // Auto-focus on mount
@@ -45,7 +45,7 @@ export default function ChatInput({ value, onChange, onSend, isLoading }) {
             value={value}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Send a message..."
+            placeholder={placeholder}
             rows={1}
             disabled={isLoading}
             className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted outline-none leading-6 disabled:opacity-50"

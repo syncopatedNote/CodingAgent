@@ -85,36 +85,41 @@ class LLMFactory:
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         **kwargs,
-    ) -> Union[ChatOllama, ChatOpenAI]:
+    ) -> ChatOpenAI:
         """
-        Create a ChatOpenAI instance for litellm.
-        Supports:
-        - ollama/* for local Ollama models
-        - github/* for GitHub Copilot models
-        - Direct OpenAI models (gpt-4, gpt-3.5-turbo, etc.)
-        """
-        # GitHub Copilot models via OpenAI-compatible API
-        actual_model = model_name.replace("github/", "")
+        Create a ChatOpenAI instance routed through the LiteLLM proxy.
 
-        # Get GitHub token from environment or kwargs
-        github_token = settings.github_token
-        if not github_token:
+        The LiteLLM proxy handles model routing, API key management,
+        and provider translation.  The model_name here corresponds
+        to a model_name entry in litellm_config.yaml.
+        """
+        proxy_url = settings.litellm_proxy_url
+        proxy_key = settings.litellm_master_key
+
+        if not proxy_url:
             raise ValueError(
-                "GITHUB_TOKEN not found. Set it in .env file or pass "
-                "as github_token kwarg."
+                "LITELLM_PROXY_URL not set. Configure it in .env "
+                "or docker-compose.yml."
             )
 
-        openai_kwargs = {
-            "base_url": ("https://models.inference.ai.azure.com"),
-            "api_key": github_token,
+        # Strip any provider prefix — LiteLLM uses its own
+        # model_name aliases defined in litellm_config.yaml
+        actual_model = model_name.replace("github/", "")
+
+        openai_kwargs: dict = {
+            "base_url": f"{proxy_url.rstrip('/')}/v1",
+            "api_key": proxy_key or "not-needed",
         }
 
-        # Add max_tokens if provided
         if max_tokens:
             openai_kwargs["max_completion_tokens"] = max_tokens
 
-        logger.info(f"Using GitHub model: {actual_model}")
-        return ChatOpenAI(model=actual_model, temperature=temperature, **openai_kwargs)
+        logger.info(f"Using LiteLLM proxy model: {actual_model} " f"via {proxy_url}")
+        return ChatOpenAI(
+            model=actual_model,
+            temperature=temperature,
+            **openai_kwargs,
+        )
 
     @staticmethod
     def _create_ollama(

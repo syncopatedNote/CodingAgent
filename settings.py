@@ -33,10 +33,26 @@ class Settings(BaseSettings):
     aws_secret_access_key: str = Field(default="", alias="AWS_SECRET_ACCESS_KEY")
     aws_region: str = Field(default="us-east-1", alias="AWS_REGION")
 
+    # LiteLLM Proxy Configuration
+    litellm_proxy_url: str = Field(
+        default="http://litellm:4000", alias="LITELLM_PROXY_URL"
+    )
+    litellm_master_key: str = Field(default="sk-1234", alias="LITELLM_MASTER_KEY")
+
     # Ollama Configuration
     ollama_base_url: str = Field(
         default="http://localhost:11434", alias="OLLAMA_BASE_URL"
     )
+
+    # Chroma (vector DB) Configuration (hosted service only)
+    chroma_server_host: str = Field(default="", alias="CHROMA_SERVER_HOST")
+    chroma_server_http_port: int = Field(default=0, alias="CHROMA_SERVER_HTTP_PORT")
+
+    # Embedding model configuration (local HuggingFace)
+    hf_embed_model: str = Field(
+        default="sentence-transformers/all-mpnet-base-v2", alias="HF_EMBED_MODEL"
+    )
+    embed_device: str = Field(default="cpu", alias="EMBED_DEVICE")
 
     # MCP Server URLs (for Docker Compose / SSE transport)
     mcp_atlassian_url: str = Field(default="", alias="MCP_ATLASSIAN_URL")

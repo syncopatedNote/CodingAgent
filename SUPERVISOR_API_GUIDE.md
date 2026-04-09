@@ -69,7 +69,7 @@ cp .env.example .env
 # Edit .env with your credentials
 
 # 3. Start the API
-uvicorn supervisor_api:app --host 0.0.0.0 --port 8000 --reload
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### Quick Test
@@ -477,7 +477,7 @@ See .env.example for details
 
 Default (development):
 ```python
-# In supervisor_api.py
+# In main.py
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allow all origins
@@ -529,7 +529,7 @@ docker compose down -v
 ```bash
 pip install gunicorn
 
-gunicorn supervisor_api:app \
+gunicorn main:app \
   --workers 4 \
   --worker-class uvicorn.workers.UvicornWorker \
   --bind 0.0.0.0:8000 \
@@ -652,7 +652,7 @@ The supervisor automatically classifies queries into:
 ## Additional Resources
 
 - **API Interactive Docs**: http://localhost:8000/api/docs
-- **Source Code**: `supervisor_api.py`
+- **Source Code**: `main.py`
 - **Agent Implementation**: `agents/supervisor_agent.py`
 - **Settings**: `settings.py`
 - **Docker Setup**: `docker-compose.yml`

@@ -120,19 +120,7 @@ class SearchAgent:
                 appropriate tool(s).
             """
 
-            # Filter out ToolMessages and AIMessages with tool_calls from history
-            # to avoid OpenAI API errors about orphaned tool messages
-            clean_history = [
-                msg
-                for msg in state["messages"]
-                if not isinstance(msg, ToolMessage)
-                and not (
-                    isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None)
-                )
-            ]
-
-            # Add the search prompt to messages
-            messages = clean_history + [HumanMessage(content=search_prompt)]
+            messages = [HumanMessage(content=search_prompt)]
 
             # Let LLM make tool calls
             response = await llm_with_tools.ainvoke(messages)

@@ -19,7 +19,7 @@ from logger import setup_logger
 
 # Import agents
 from .search_agent import SearchAgent
-from .coding_agent import CodingAgent
+from .langgraph_coding_agent import LangGraphCodingAgent
 from .question_enhancer_agent import enhance_question
 
 logger = setup_logger(__name__)
@@ -70,14 +70,8 @@ class SupervisorAgent:
         # Initialize sub-agents
         self.search_agent = SearchAgent()
 
-        # Initialize coding agent if environment is configured
-        self.coding_agent = None
-        if settings.gitlab_project_id:
-            self.coding_agent = CodingAgent(
-                gitlab_project_id=settings.gitlab_project_id,
-                development_rules_path=settings.development_rules_path,
-                development_rules_branch=settings.development_rules_branch,
-            )
+        # Initialize coding agent (uses MCP tools for repo access)
+        self.coding_agent = LangGraphCodingAgent()
 
         # Build the workflow graph
         self.graph = self._build_graph()
@@ -286,50 +280,29 @@ class SupervisorAgent:
         return state
 
     async def _invoke_coding_agent(self, state: SupervisorState) -> SupervisorState:
-        """Invoke the coding agent for code generation"""
+        """Invoke the LangGraph coding agent for code generation.
+
+        The coding agent handles its own information gathering via
+        ``ask_user`` interrupts, so we simply forward the user's
+        request and propagate the result.
+        """
         try:
-            if not self.coding_agent:
-                state["error_message"] = (
-                    "Coding agent not available. Please configure OPENAI_API_KEY and GITLAB_PROJECT_ID environment variables."
-                )
-                return state
-
-            # Get Jira ticket key
-            jira_tickets = state["extracted_jira_tickets"]
-
-            if not jira_tickets:
-                # Ask user for Jira ticket key
-                state["requires_user_input"] = True
-                state["pending_action"] = "get_jira_ticket_key"
-                state[
-                    "final_response"
-                ] = """To generate code, I need a Jira ticket reference.
-
-                    Please provide the Jira ticket key (e.g., PROJ-123, DEV-456) that contains the requirements for code generation."""
-                return state
-
-            # Use the first Jira ticket found
-            jira_key = jira_tickets[0]
-
-            # Run the coding agent with enhanced question context (now properly awaited)
-            coding_result = await self.coding_agent.run(
-                jira_ticket_key=jira_key, enhanced_context=state["enhanced_question"]
+            result = await self.coding_agent.run(
+                user_input=state["enhanced_question"] or state["user_input"],
             )
-            state["coding_agent_result"] = coding_result
+            state["coding_agent_result"] = result
 
-            # Process the result
-            if coding_result.get("error_message"):
-                state["error_message"] = coding_result["error_message"]
-            elif coding_result.get("user_input_required"):
+            if result.get("interrupt"):
+                # Coding agent paused to ask the user a question
                 state["requires_user_input"] = True
-                state["pending_action"] = "provide_confluence_link"
-                state[
-                    "final_response"
-                ] = """The coding agent needs additional information.
-
-Please provide the Confluence design document link that contains the detailed requirements for this ticket."""
+                state["pending_action"] = "coding_agent_interrupt"
+                state["final_response"] = result["interrupt"].get(
+                    "question", "The coding agent needs your input."
+                )
+            elif result.get("response"):
+                state["final_response"] = result["response"]
             else:
-                state["final_response"] = self._format_coding_result(coding_result)
+                state["error_message"] = "Coding agent returned no response."
 
         except Exception as e:
             state["error_message"] = f"Error invoking coding agent: {str(e)}"

@@ -19,7 +19,7 @@ middleware resolves the stored interrupt, and passes
 ``is_resume=True``, the user's ``resume_data``, and the
 previously saved ``agent_state``.
 
-Usage in ``supervisor_api.py``::
+Usage in ``main.py``::
 
     middleware = AgUIMiddleware()
 
