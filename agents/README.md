@@ -24,7 +24,7 @@ This directory contains the agent-based architecture for the CBP AI Wizard, feat
                       ▼                   ▼
 ┌─────────────────────────────────┐ ┌─────────────────────────────────┐
 │          Search Agent           │ │         Coding Agent            │
-│       (search_agent.py)         │ │      (coding_agent.py)          │
+│       (search_agent.py)         │ │      (langgraph_coding_agent.py)          │
 │                                 │ │                                 │
 │ Responsibilities:               │ │ Responsibilities:               │
 │ • Confluence document search    │ │ • Fetch Jira ticket details    │
@@ -79,7 +79,7 @@ This directory contains the agent-based architecture for the CBP AI Wizard, feat
 - Formatted result presentation
 - Error handling and fallbacks
 
-### 3. Coding Agent (coding_agent.py)
+### 3. Coding Agent (langgraph_coding_agent.py)
 
 **Purpose**: Generate code from Jira ticket requirements.
 
@@ -109,7 +109,7 @@ agents/
 ├── __init__.py                    # Package initialization
 ├── supervisor_agent.py              # Simplified supervisor agent
 ├── search_agent.py                # Dedicated search agent
-├── coding_agent.py                # Code generation agent
+├── langgraph_coding_agent.py                # Code generation agent
 ├── question_enhancer_agent.py     # Question enhancement utility
 └── requirements.txt               # Agent-specific dependencies
 ```

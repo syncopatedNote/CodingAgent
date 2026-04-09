@@ -393,7 +393,7 @@ Coding_agent/
 ├── agents/                     # Multi-agent system
 │   ├── supervisor_agent.py     # Main orchestration agent
 │   ├── search_agent.py         # Search and retrieval agent
-│   ├── coding_agent.py         # Code generation agent
+│   ├── langgraph_coding_agent.py         # Code generation agent (LangGraph)
 │   ├── question_enhancer_agent.py # Query enhancement
 │   ├── components/             # Modular agent components
 │   │   ├── jira_handler.py
