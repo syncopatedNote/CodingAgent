@@ -402,7 +402,7 @@ class LangGraphCodingAgent:
                     params = "(" + ", ".join(parts) + ")"
                 except (AttributeError, TypeError, ValueError, KeyError) as e:
                     logger.warning(
-                        f"Failed to parse args_schema for tool %s: %s - skipping schema",
+                        "Failed to parse args_schema for tool %s: %s - skipping schema",
                         getattr(t, "name", str(t)),
                         e,
                         exc_info=True,

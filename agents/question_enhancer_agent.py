@@ -31,60 +31,89 @@ def start_node(state: AgentState) -> AgentState:
     return state
 
 
+def _is_error_message(content: str) -> bool:
+    """Return True if the message content is an agent error response."""
+    error_markers = (
+        "❌",
+        "cannot perform this search",
+        "search error",
+        "mcp server",
+        "not available",
+        "i'm having trouble",
+        "something went wrong",
+        "i couldn't generate",
+        "i encountered an error",
+    )
+    lowered = content.lower()
+    return any(marker.lower() in lowered for marker in error_markers)
+
+
 def enhance_node(state: AgentState) -> AgentState:
     """
-    Enhance node - rephrases the last question
-    using conversation history
+    Enhance node - rephrases the last question using conversation history.
+
+    Only the most recent successful exchange (1 human + 1 AI turn) is used
+    as context.  Error responses are stripped out entirely so they cannot
+    bleed into unrelated follow-up questions.
     """
     messages = state["messages"]
     last_message = messages[-1].content
 
-    # Check if there's meaningful conversation history
-    # (more than just the current question)
-    # All messages except the current one
-    conversation_history = messages[:-1]
+    # All messages except the current question
+    prior_messages = messages[:-1]
 
-    # If there's no conversation history,
-    # return the original question unchanged
-    if not conversation_history:
-        state["enhanced_question"] = last_message
-        return state
-
-    # Filter out empty or very short messages that don't add context
-    meaningful_history = [
+    # 1. Strip error / system-failure responses — they carry no useful context.
+    meaningful_prior = [
         msg
-        for msg in conversation_history
-        if msg.content and len(msg.content.strip()) > 10
+        for msg in prior_messages
+        if msg.content
+        and len(msg.content.strip()) > 10
+        and not _is_error_message(msg.content)
     ]
 
-    # If no meaningful history, return original question
-    if not meaningful_history:
+    # 2. No usable history → return unchanged
+    if not meaningful_prior:
         state["enhanced_question"] = last_message
         return state
 
-    # Build context from meaningful conversation history
+    # 3. Use only the single most recent exchange (last human + last AI pair)
+    #    to avoid cross-contamination from older, unrelated topics.
+    recent_context = meaningful_prior[-2:]  # at most [HumanMessage, AIMessage]
+
     context = "\n".join(
-        [f"{msg.__class__.__name__}: {msg.content}" for msg in meaningful_history]
+        [f"{msg.__class__.__name__}: {msg.content}" for msg in recent_context]
     )
 
-    # Create enhancement prompt
-    enhancement_prompt = f"""
-                Given the conversation history and the current question,
-                rephrase the question to be more specific and contextual
-                for better vector store retrieval.
-                Only enhance if the current question is a follow-up that
-                would benefit from previous context. If the question is
-                already clear and specific, return it unchanged.
-                Return ONLY the enhanced question without any explanation
-                or additional text.
+    enhancement_prompt = f"""Your task is to rephrase a question to add useful \
+context from the immediately preceding conversation exchange — but ONLY when the \
+current question is a genuine follow-up to that exchange.
 
-                Conversation History:
-                {context}
+Rules (follow strictly):
+1. If the current question targets a DIFFERENT system, service, or topic than the \
+previous exchange, return it UNCHANGED.
+2. If the current question is already self-contained and specific, return it UNCHANGED.
+3. Only add context when the current question is a direct follow-up (e.g. "what about \
+the other one?" or "give me more detail on that").
+4. Never merge two unrelated topics together.
+5. Return ONLY the (possibly enhanced) question — no explanation, no preamble.
 
-                Current Question: {last_message}
+Example of when NOT to enhance:
+  Previous: "get broadband design docs from Confluence"
+  Current:  "get details of the abc repository on GitLab"
+  → Return unchanged: "get details of the abc repository on GitLab"
+  (Different systems, unrelated topics.)
 
-                Enhanced Question (add context only if needed):
-                """
+Example of when TO enhance:
+  Previous: "get details of the abc repository on GitLab"
+  Current:  "what open merge requests does it have?"
+  → Enhanced: "what open merge requests does the abc repository on GitLab have?"
+
+Recent conversation:
+{context}
+
+Current question: {last_message}
+
+Enhanced question:"""
 
     llm = model
     response = llm.invoke([HumanMessage(content=enhancement_prompt)])

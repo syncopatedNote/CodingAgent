@@ -253,13 +253,9 @@ class SupervisorAgent:
     async def _invoke_search_agent(self, state: SupervisorState) -> SupervisorState:
         """Invoke the search agent to handle search operations"""
         try:
-            # Get conversation history for context
-            conversation_history = state["messages"]
-
             # Call the search agent with enhanced question (now async)
             search_result = await self.search_agent.search(
                 query=state["enhanced_question"] or state["user_input"],
-                conversation_history=conversation_history,
             )
 
             state["search_agent_result"] = search_result
