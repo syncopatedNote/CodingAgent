@@ -354,7 +354,7 @@ export default function Home() {
           </button>
           <div className="flex items-center gap-2">
             <Bot className="w-5 h-5 text-primary" />
-            <h1 className="text-sm font-semibold text-foreground">Hey Man!</h1>
+            <h1 className="text-sm font-semibold text-foreground">Cortex</h1>
           </div>
           <div className="ml-auto flex items-center gap-1.5">
             <div
@@ -382,7 +382,7 @@ export default function Home() {
                   <Sparkles className="w-7 h-7 text-primary" />
                 </div>
                 <h2 className="text-2xl font-semibold text-foreground mb-2">
-                  Hey Man!
+                  Hi, I&apos;m Cortex.
                   How can I help you?
                 </h2>
                 <p className="text-sm text-muted mb-8 max-w-md mx-auto">

@@ -10,6 +10,8 @@ services:
     environment:
       # API endpoint for the backend
       NEXT_PUBLIC_API_URL: http://supervisor-api:8000
+      # RAG upload service (server-side rewrite only — not exposed to browser)
+      RAG_SERVICE_URL: http://rag-service:8001
       NODE_ENV: production
     depends_on:
       - supervisor-api
@@ -79,14 +81,18 @@ services:
       MCP_ATLASSIAN_ENABLED: ${MCP_ATLASSIAN_ENABLED:-true}
       MCP_GITLAB_ENABLED: ${MCP_GITLAB_ENABLED:-true}
       MCP_GITHUB_ENABLED: ${MCP_GITHUB_ENABLED:-true}
+
+      # ChromaDB Vector Store
+      CHROMA_SERVER_HOST: chroma
+      CHROMA_SERVER_HTTP_PORT: ${CHROMA_SERVER_HTTP_PORT:-8000}
     volumes:
       - .:/app
-      - chroma_db:/app/chroma_db
     depends_on:
       - mcp-atlassian
       - mcp-gitlab
       - mcp-context7
       - litellm
+      - chroma
     networks:
       - supervisor-network
     restart: unless-stopped
@@ -127,26 +133,28 @@ services:
       retries: 3
       start_period: 40s
 
-  # # MongoDB for Document Storage
-  # mongodb:
-  #   image: mongo:7.0
-  #   container_name: supervisor-mongodb
-  #   ports:
-  #     - "27017:27017"
-  #   environment:
-  #     MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME:-admin}
-  #     MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-password}
-  #   volumes:
-  #     - mongodb_data:/data/db
-  #     - mongodb_config:/data/configdb
-  #   networks:
-  #     - supervisor-network
-  #   restart: unless-stopped
-  #   healthcheck:
-  #     test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
+  # ChromaDB Vector Store
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: chroma
+    ports:
+      - "8002:8000"
+    environment:
+      ANONYMIZED_TELEMETRY: "false"
+      ALLOW_RESET: "false"
+    volumes:
+      - chroma_db:/chroma/chroma
+    networks:
+      - supervisor-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # Docstore now uses Redis (the same instance as RQ) — no MongoDB needed.
 
   # MCP Atlassian Server (Confluence & Jira)
   mcp-atlassian:
@@ -199,6 +207,87 @@ services:
       retries: 3
       start_period: 40s
 
+  # RAG Upload Service
+  rag-service:
+    build:
+      context: ./RAG
+      dockerfile: Dockerfile
+    container_name: rag-service
+    ports:
+      - "8001:8001"
+    environment:
+      RAG_AWS_ACCESS_KEY_ID: ${RAG_AWS_ACCESS_KEY_ID}
+      RAG_AWS_SECRET_ACCESS_KEY: ${RAG_AWS_SECRET_ACCESS_KEY}
+      RAG_AWS_REGION: ${RAG_AWS_REGION:-us-east-1}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+      PRESIGNED_URL_EXPIRY_SECONDS: ${PRESIGNED_URL_EXPIRY_SECONDS:-300}
+    networks:
+      - supervisor-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # Redis for RQ
+  redis:
+    image: redis:7
+    container_name: rag-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - supervisor-network
+    restart: unless-stopped
+
+  # Worker for RQ jobs (ingestion)
+  rag-worker:
+    build:
+      context: .
+      dockerfile: RAG/Dockerfile.rag_worker
+    container_name: rag-worker
+    command: rq worker --url ${RAG_REDIS_URL:-redis://redis:6379/0}
+    environment:
+      RAG_AWS_ACCESS_KEY_ID: ${RAG_AWS_ACCESS_KEY_ID}
+      RAG_AWS_SECRET_ACCESS_KEY: ${RAG_AWS_SECRET_ACCESS_KEY}
+      RAG_AWS_REGION: ${RAG_AWS_REGION:-us-east-1}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+      RAG_REDIS_URL: ${RAG_REDIS_URL:-redis://redis:6379/0}
+      # LLM (used by pdf_loader for chunk summarization via LiteLLM proxy)
+      LLM_PROVIDER: ${LLM_PROVIDER:-litellm}
+      LLM_MODEL_NAME: ${LLM_MODEL_NAME:-gpt-4o-mini}
+      LLM_MODEL_TYPE: ${LLM_MODEL_TYPE:-chat}
+      LITELLM_PROXY_URL: ${LITELLM_PROXY_URL:-http://litellm:4000}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-sk-1234}
+      # Chroma (vector store)
+      CHROMA_SERVER_HOST: chroma
+      CHROMA_SERVER_HTTP_PORT: ${CHROMA_SERVER_HTTP_PORT:-8000}
+    depends_on:
+      - redis
+      - rag-service
+      - litellm
+      - chroma
+    networks:
+      - supervisor-network
+    restart: unless-stopped
+
+  # RQ Dashboard for monitoring jobs
+  rag-rq-dashboard:
+    image: python:3.11-slim
+    container_name: rag-rq-dashboard
+    ports:
+      - "9181:9181"
+    command: >-
+      sh -c "pip install --no-cache-dir rq-dashboard && rq-dashboard --redis-url ${RAG_REDIS_URL:-redis://redis:6379/0} --port 9181"
+    environment:
+      RAG_REDIS_URL: ${RAG_REDIS_URL:-redis://redis:6379/0}
+    depends_on:
+      - redis
+    networks:
+      - supervisor-network
+    restart: unless-stopped
+
   # MCP Context7 Server (Library Documentation)
   mcp-context7:
     image: node:20-alpine
@@ -235,10 +324,6 @@ services:
   #     - debug
 
 volumes:
-  # mongodb_data:
-  #   driver: local
-  # mongodb_config:
-  #   driver: local
   chroma_db:
     driver: local
 
@@ -255,7 +340,9 @@ networks:
 # Services Available:
 # - Agent UI (Next.js):          http://localhost:3000
 # - Supervisor API (Backend):    http://localhost:8000
+# - RAG Upload Service:          http://localhost:8001
 # - LiteLLM Proxy:               http://localhost:4000
+# - ChromaDB:                    http://localhost:8002
 # - MongoDB Express (optional):  http://localhost:8081
 # - MCP Atlassian:               http://localhost:3001
 # - MCP GitLab:                  http://localhost:3333

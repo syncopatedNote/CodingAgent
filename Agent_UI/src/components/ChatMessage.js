@@ -55,7 +55,7 @@ export default function ChatMessage({ message }) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <span className="text-sm font-semibold text-foreground">
-                {isUser ? "You" : "Hey Man!"}
+                {isUser ? "You" : "Cortex"}
               </span>
               {!isUser && message.taskAnalysis && (
                 <TaskBadge
@@ -102,7 +102,7 @@ export function TypingIndicator() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <span className="text-sm font-semibold text-foreground">
-                Hey Man!
+                Cortex
               </span>
             </div>
             <div className="flex items-center gap-2">

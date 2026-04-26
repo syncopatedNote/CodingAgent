@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   Plus,
+  Upload,
   MessageSquare,
   Search,
   Code2,
@@ -62,7 +64,7 @@ export default function ChatSidebar({ isOpen, onClose, onNewChat, onSelectExampl
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
               <Bot className="w-4 h-4 text-white" />
             </div>
-            <span className="font-semibold text-sm text-foreground">Hey!</span>
+            <span className="font-semibold text-sm text-foreground">Cortex</span>
           </div>
           <button
             onClick={onClose}
@@ -73,7 +75,7 @@ export default function ChatSidebar({ isOpen, onClose, onNewChat, onSelectExampl
         </div>
 
         {/* New Chat */}
-        <div className="p-3">
+        <div className="p-3 pb-1 space-y-2">
           <button
             onClick={onNewChat}
             className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-border dark:border-border-dark hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors text-sm font-medium text-foreground"
@@ -81,6 +83,14 @@ export default function ChatSidebar({ isOpen, onClose, onNewChat, onSelectExampl
             <Plus className="w-4 h-4" />
             New Chat
           </button>
+          <Link
+            href="/upload"
+            onClick={onClose}
+            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-dashed border-border dark:border-border-dark hover:bg-primary/5 hover:border-primary/40 dark:hover:bg-primary/10 transition-colors text-sm font-medium text-muted hover:text-foreground"
+          >
+            <Upload className="w-4 h-4" />
+            Upload Documents for RAG
+          </Link>
         </div>
 
         {/* Scrollable content */}

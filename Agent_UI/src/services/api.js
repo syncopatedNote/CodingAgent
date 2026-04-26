@@ -169,9 +169,96 @@ export const resumeAgent = (
   });
 };
 
+// =====================================================================
+// RAG Upload Service
+// =====================================================================
+
+/**
+ * Request a presigned S3 POST URL from the RAG upload service.
+ * The Next.js server proxies /rag-api/* → rag-service, so this
+ * works identically in local dev and Docker.
+ *
+ * @param {string} filename     - Original file name
+ * @param {string} contentType  - MIME type (e.g. "application/pdf")
+ * @returns {Promise<{url: string, fields: object, object_key: string}>}
+ */
+export const getPresignedUrl = async (filename, contentType) => {
+  const response = await fetch("/rag-api/upload/presigned-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename, content_type: contentType }),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to get upload URL (${response.status})`);
+  }
+  return response.json();
+};
+
+/**
+ * Upload a file directly to S3 using a presigned POST envelope.
+ * The file travels browser → S3 directly; the backend is not involved.
+ *
+ * @param {string}   url        - S3 POST target URL
+ * @param {object}   fields     - Presigned form fields (must precede the file)
+ * @param {File}     file       - The file object to upload
+ * @param {Function} onProgress - (percent: number) progress callback
+ * @returns {Promise<void>}
+ */
+export const uploadFileToS3 = (url, fields, file, onProgress) => {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    // S3 requires all policy fields to appear before the file
+    Object.entries(fields).forEach(([k, v]) => formData.append(k, v));
+    formData.append("file", file);
+
+    const xhr = new XMLHttpRequest();
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        reject(new Error(`S3 upload failed with status ${xhr.status}`));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error("Network error during upload."));
+
+    xhr.open("POST", url);
+    xhr.send(formData);
+  });
+};
+
+
+/**
+ * Notify the backend that an upload completed and request ingestion.
+ * @param {string} objectKey
+ * @returns {Promise<{job_id:string,status_url:string}>}
+ */
+export const notifyUploadComplete = async (objectKey) => {
+  const response = await fetch(`/rag-api/upload/complete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ object_key: objectKey }),
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || `Failed to notify upload complete (${response.status})`);
+  }
+  return response.json();
+};
+
 export default {
   checkHealth,
   runAgentChat,
   resumeAgent,
   getApiBaseUrl,
+  getPresignedUrl,
+  uploadFileToS3,
 };
