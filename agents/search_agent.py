@@ -19,6 +19,8 @@ from langchain_core.messages import (
 from langchain_mcp_adapters.tools import load_mcp_tools
 from framework_base.llm_base import LLMFactory
 from framework_base.multi_server_mcp_client import get_read_only_tools
+from framework_base.mcp_servers.registry import get_mcp_registry
+from agents.components.search_classifier import classify_search_query, SearchCategory
 from settings import settings
 from logger import setup_logger
 
@@ -33,6 +35,7 @@ class SearchState(TypedDict):
     tool_results: List[Dict]  # Results from tool calls
     final_response: Optional[str]
     error_message: Optional[str]
+    search_category: Optional[str]  # Classified SearchCategory value
 
 
 class SearchAgent:
@@ -54,14 +57,22 @@ class SearchAgent:
         """Build the simplified search workflow graph"""
         workflow = StateGraph(SearchState)
 
+        workflow.add_node("classify_query", self._classify_and_validate)
         workflow.add_node("execute_search", self._execute_search)
         workflow.add_node("format_response", self._format_response)
         workflow.add_node("handle_error", self._handle_error)
 
-        # Set entry point
-        workflow.set_entry_point("execute_search")
+        # Entry: classify first
+        workflow.set_entry_point("classify_query")
 
-        # Simple routing
+        # After classification: proceed to search or short-circuit to error
+        workflow.add_conditional_edges(
+            "classify_query",
+            self._route_after_classify,
+            {"search": "execute_search", "error": "handle_error"},
+        )
+
+        # After search: format or error
         workflow.add_conditional_edges(
             "execute_search",
             self._route_after_search,
@@ -74,15 +85,68 @@ class SearchAgent:
 
         return workflow.compile()
 
-    async def _load_mcp_tools(self):
-        """Load MCP tools filtered for search operations using readOnlyHint"""
+    async def _load_mcp_tools(self, server_name: str):
+        """Load read-only MCP tools from a specific server."""
         try:
-            tools = await get_read_only_tools()
-            logger.info(f"Loaded {len(tools)} read-only search tools")
+            tools = await get_read_only_tools(server_name=server_name)
+            logger.info(
+                f"Loaded {len(tools)} read-only tools from server '{server_name}'"
+            )
             return tools
         except Exception as e:
-            logger.error(f"Failed to load MCP tools: {str(e)}")
+            logger.error(
+                f"Failed to load MCP tools from server '{server_name}': {str(e)}"
+            )
             return []
+
+    async def _classify_and_validate(self, state: SearchState) -> SearchState:
+        """
+        Classify the query and verify the required MCP server is enabled.
+        Sets error_message and short-circuits if the server is unavailable.
+        """
+        category = await classify_search_query(state["query"])
+        state["search_category"] = category.value
+        logger.info(f"Search query classified as: {category.value}")
+
+        if category is SearchCategory.UNKNOWN:
+            state["error_message"] = (
+                "I couldn't determine which system to search. "
+                "Please mention the system explicitly — for example: "
+                "Confluence, Jira, GitHub, GitLab, or documentation."
+            )
+            return state
+
+        # Check that the mapped MCP server is enabled and available
+        registry = get_mcp_registry()
+        enabled_servers = registry.get_enabled_servers()
+        server_name = category.value  # SearchCategory values == server names
+
+        if server_name not in enabled_servers:
+            all_servers = registry.get_all_servers()
+            server_cfg = all_servers.get(server_name)
+            if server_cfg and not server_cfg.enabled:
+                reason = "it is disabled"
+            elif server_cfg and not server_cfg.is_available():
+                reason = "its credentials are not configured"
+            else:
+                reason = "it is not registered"
+
+            state["error_message"] = (
+                f"Cannot perform this search: the '{server_name}' MCP server "
+                f"required to handle this request is not available ({reason}). "
+                "Please enable and configure the server, or search a different system."
+            )
+            logger.warning(
+                "Rejecting search — required MCP server not available",
+                server=server_name,
+                reason=reason,
+            )
+
+        return state
+
+    def _route_after_classify(self, state: SearchState) -> str:
+        """Proceed to search, or short-circuit to error handler."""
+        return "error" if state.get("error_message") else "search"
 
     async def _execute_search(self, state: SearchState) -> SearchState:
         """
@@ -90,12 +154,15 @@ class SearchAgent:
         The LLM decides which tools to call based on the query.
         """
         try:
-            # Load available MCP tools
-            tools = await self._load_mcp_tools()
+            # Load tools scoped to the classified server only
+            server_name = state.get("search_category", "")
+            tools = await self._load_mcp_tools(server_name=server_name)
 
             if not tools:
                 state["error_message"] = (
-                    "No MCP tools available. Please check MCP server" "connection."
+                    f"No read-only tools are available from the '{server_name}' "
+                    "MCP server. The server may be running but exposes no "
+                    "read-only tools. Please check the server configuration."
                 )
                 return state
 
@@ -105,8 +172,8 @@ class SearchAgent:
             # Build the prompt for the LLM
             tool_names = [t.name for t in tools]
             search_prompt = f"""
-                You are a search assistant with access to various read-only
-                tools for GitHub, Confluence, and Jira.
+                You are a search assistant with access to read-only tools
+                for {server_name}.
                 User Query: {state['query']}
 
                 Your task:
@@ -120,19 +187,7 @@ class SearchAgent:
                 appropriate tool(s).
             """
 
-            # Filter out ToolMessages and AIMessages with tool_calls from history
-            # to avoid OpenAI API errors about orphaned tool messages
-            clean_history = [
-                msg
-                for msg in state["messages"]
-                if not isinstance(msg, ToolMessage)
-                and not (
-                    isinstance(msg, AIMessage) and getattr(msg, "tool_calls", None)
-                )
-            ]
-
-            # Add the search prompt to messages
-            messages = clean_history + [HumanMessage(content=search_prompt)]
+            messages = [HumanMessage(content=search_prompt)]
 
             # Let LLM make tool calls
             response = await llm_with_tools.ainvoke(messages)
@@ -310,25 +365,23 @@ class SearchAgent:
         else:
             return "format"
 
-    async def search(
-        self, query: str, conversation_history: List[BaseMessage] = None
-    ) -> Dict:
+    async def search(self, query: str) -> Dict:
         """
         Perform a search based on the query using LLM function calling.
 
         Args:
             query: The search query
-            conversation_history: Previous conversation messages (for context)
 
         Returns:
             Search results and formatted response
         """
         initial_state = SearchState(
-            messages=conversation_history or [],
+            messages=[],
             query=query,
             tool_results=[],
             final_response=None,
             error_message=None,
+            search_category=None,
         )
 
         final_state = await self.graph.ainvoke(initial_state)

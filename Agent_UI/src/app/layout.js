@@ -12,9 +12,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "Hey!",
+  title: "Cortex",
   description:
-    "Enterprise AI assistant — search docs, generate code, and chat via an intelligent multi-agent supervisor.",
+    "Cortex — Enterprise AI assistant for searching docs, generating code, and querying your enterprise systems.",
 };
 
 export default function RootLayout({ children }) {

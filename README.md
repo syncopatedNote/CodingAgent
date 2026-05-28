@@ -265,7 +265,7 @@ See [MCP_ARCHITECTURE.md](MCP_ARCHITECTURE.md) for detailed information.
 
 2. **Launch REST API**
    ```bash
-   uvicorn supervisor_api:app --host 0.0.0.0 --port 8000 --reload
+   uvicorn main:app --host 0.0.0.0 --port 8000 --reload
    ```
    Visit http://localhost:8000/api/docs
 
@@ -393,7 +393,7 @@ Coding_agent/
 ├── agents/                     # Multi-agent system
 │   ├── supervisor_agent.py     # Main orchestration agent
 │   ├── search_agent.py         # Search and retrieval agent
-│   ├── coding_agent.py         # Code generation agent
+│   ├── langgraph_coding_agent.py         # Code generation agent (LangGraph)
 │   ├── question_enhancer_agent.py # Query enhancement
 │   ├── components/             # Modular agent components
 │   │   ├── jira_handler.py
@@ -414,7 +414,7 @@ Coding_agent/
 │   └── chat.py                # Simple chat interface
 ├── chroma_db/                 # ChromaDB vector storage (auto-created)
 ├── logs/                      # Application logs (auto-created)
-├── supervisor_api.py          # FastAPI REST API service
+├── main.py                    # FastAPI REST API service
 ├── settings.py                # Application settings and configuration
 ├── logger.py                  # Logging configuration
 ├── utils.py                   # Utility functions

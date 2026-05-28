@@ -4,6 +4,7 @@ model_list:
       model: github/gpt-4o
       api_base: https://models.inference.ai.azure.com
       api_key: os.environ/GITHUB_LITE_LLM_PAT  # pragma: allowlist secret
+
   - model_name: gpt-4o-mini
     litellm_params:
       model: github/gpt-4o-mini
@@ -19,24 +20,6 @@ model_list:
   - model_name: o1-mini
     litellm_params:
       model: github/o1-mini
-      api_base: https://models.inference.ai.azure.com
-      api_key: os.environ/GITHUB_LITE_LLM_PAT  # pragma: allowlist secret
-
-  - model_name: claude-3.5-sonnet
-    litellm_params:
-      model: github/claude-3.5-sonnet
-      api_base: https://models.inference.ai.azure.com
-      api_key: os.environ/GITHUB_LITE_LLM_PAT  # pragma: allowlist secret
-
-  - model_name: claude-4.5-opus
-    litellm_params:
-      model: github/claude-4-5-opus
-      api_base: https://models.inference.ai.azure.com
-      api_key: os.environ/GITHUB_LITE_LLM_PAT  # pragma: allowlist secret
-
-  - model_name: claude-4.5-sonnet
-    litellm_params:
-      model: github/claude-4-5-sonnet
       api_base: https://models.inference.ai.azure.com
       api_key: os.environ/GITHUB_LITE_LLM_PAT  # pragma: allowlist secret
 

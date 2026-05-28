@@ -170,7 +170,7 @@ npm run dev
 # Run only Supervisor API locally
 cd Coding_agent
 pip install -r requirements.txt
-uvicorn supervisor_api:app --reload --port 8000
+uvicorn main:app --reload --port 8000
 
 # Run supporting services via Docker
 docker-compose up mongodb litellm mcp-atlassian mcp-gitlab -d

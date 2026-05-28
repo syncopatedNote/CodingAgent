@@ -19,8 +19,9 @@ from logger import setup_logger
 
 # Import agents
 from .search_agent import SearchAgent
-from .coding_agent import CodingAgent
+from .langgraph_coding_agent import LangGraphCodingAgent
 from .question_enhancer_agent import enhance_question
+from .general_chat_agent import GeneralChatAgent
 
 logger = setup_logger(__name__)
 
@@ -69,15 +70,10 @@ class SupervisorAgent:
 
         # Initialize sub-agents
         self.search_agent = SearchAgent()
+        self.general_chat_agent = GeneralChatAgent()
 
-        # Initialize coding agent if environment is configured
-        self.coding_agent = None
-        if settings.gitlab_project_id:
-            self.coding_agent = CodingAgent(
-                gitlab_project_id=settings.gitlab_project_id,
-                development_rules_path=settings.development_rules_path,
-                development_rules_branch=settings.development_rules_branch,
-            )
+        # Initialize coding agent (uses MCP tools for repo access)
+        self.coding_agent = LangGraphCodingAgent()
 
         # Build the workflow graph
         self.graph = self._build_graph()
@@ -198,17 +194,38 @@ class SupervisorAgent:
 
         classification_prompt = f"""
             Classify the following user request into exactly one of these categories:
+
             **Categories:**
-            1. CODE_GENERATION - User wants to generate, write, implement, or develop code
-            2. SEARCH_OPERATION - User wants to find, search, lookup, or retrieve information from Confluence, Jira, or documentation
-            3. GENERAL_CHAT - General questions, greetings, or requests that don't fit the above
+            1. CODE_GENERATION - User explicitly wants to generate, write,
+               implement, or develop code.
+            2. SEARCH_OPERATION - User explicitly wants to search or look up
+               information INSIDE a specific external system: Confluence,
+               Jira, GitLab, or GitHub. The request must name or clearly
+               imply one of these platforms.
+            3. GENERAL_CHAT - Everything else: general questions, knowledge
+               queries, greetings, requests for explanation, questions about
+               people/projects/technologies, or anything that does not
+               explicitly target one of the platforms above.
 
             **User Request:** {user_input}{jira_context}
 
-            **Classification Rules:**
-            - If the request mentions generating/implementing code or includes Jira tickets with coding context → CODE_GENERATION
-            - If the request is about finding/searching information, looking up documentation, or fetching Jira/Confluence data → SEARCH_OPERATION
-            - If the request is a general question, greeting, or casual conversation → GENERAL_CHAT
+            **Classification Rules (apply in order):**
+            - → CODE_GENERATION only if the user wants code to be written or
+              generated (e.g. "write a function", "implement PROJ-123").
+            - → SEARCH_OPERATION only if the user explicitly names or clearly
+              implies Confluence, Jira, GitLab, or GitHub AND is asking to
+              search/fetch/look up content within that platform.
+              Examples of qualifying phrases: "search Confluence for …",
+              "find the Jira ticket …", "look up in GitLab …", "fetch the
+              GitHub issue …".
+            - → GENERAL_CHAT for everything else, including questions about
+              people, technologies, projects, or general knowledge — even if
+              they use words like "find", "know", "has", "worked on", etc.
+              A question like "has Alice worked on AWS ECS?" is GENERAL_CHAT
+              because it is a knowledge question, not an explicit request to
+              query a platform.
+
+            **IMPORTANT:** When in doubt, default to GENERAL_CHAT.
 
             **Response Format (respond with ONLY this format, nothing else):**
             CATEGORY: [ONE OF: CODE_GENERATION, SEARCH_OPERATION, GENERAL_CHAT]
@@ -217,8 +234,11 @@ class SupervisorAgent:
 
             Examples:
             - "Generate code for PROJ-123" → CODE_GENERATION, 0.95
-            - "Find documentation about API" → SEARCH_OPERATION, 0.90
-            - "What can you help with?" → GENERAL_CHAT, 0.85
+            - "Search Confluence for deployment docs" → SEARCH_OPERATION, 0.95
+            - "Find the Jira ticket PROJ-42" → SEARCH_OPERATION, 0.92
+            - "Has Alice worked on AWS ECS?" → GENERAL_CHAT, 0.95
+            - "What is Kubernetes?" → GENERAL_CHAT, 0.98
+            - "What can you help with?" → GENERAL_CHAT, 0.90
         """
 
         try:
@@ -259,13 +279,9 @@ class SupervisorAgent:
     async def _invoke_search_agent(self, state: SupervisorState) -> SupervisorState:
         """Invoke the search agent to handle search operations"""
         try:
-            # Get conversation history for context
-            conversation_history = state["messages"]
-
             # Call the search agent with enhanced question (now async)
             search_result = await self.search_agent.search(
                 query=state["enhanced_question"] or state["user_input"],
-                conversation_history=conversation_history,
             )
 
             state["search_agent_result"] = search_result
@@ -286,89 +302,42 @@ class SupervisorAgent:
         return state
 
     async def _invoke_coding_agent(self, state: SupervisorState) -> SupervisorState:
-        """Invoke the coding agent for code generation"""
+        """Invoke the LangGraph coding agent for code generation.
+
+        The coding agent handles its own information gathering via
+        ``ask_user`` interrupts, so we simply forward the user's
+        request and propagate the result.
+        """
         try:
-            if not self.coding_agent:
-                state["error_message"] = (
-                    "Coding agent not available. Please configure OPENAI_API_KEY and GITLAB_PROJECT_ID environment variables."
-                )
-                return state
-
-            # Get Jira ticket key
-            jira_tickets = state["extracted_jira_tickets"]
-
-            if not jira_tickets:
-                # Ask user for Jira ticket key
-                state["requires_user_input"] = True
-                state["pending_action"] = "get_jira_ticket_key"
-                state[
-                    "final_response"
-                ] = """To generate code, I need a Jira ticket reference.
-
-                    Please provide the Jira ticket key (e.g., PROJ-123, DEV-456) that contains the requirements for code generation."""
-                return state
-
-            # Use the first Jira ticket found
-            jira_key = jira_tickets[0]
-
-            # Run the coding agent with enhanced question context (now properly awaited)
-            coding_result = await self.coding_agent.run(
-                jira_ticket_key=jira_key, enhanced_context=state["enhanced_question"]
+            result = await self.coding_agent.run(
+                user_input=state["enhanced_question"] or state["user_input"],
             )
-            state["coding_agent_result"] = coding_result
+            state["coding_agent_result"] = result
 
-            # Process the result
-            if coding_result.get("error_message"):
-                state["error_message"] = coding_result["error_message"]
-            elif coding_result.get("user_input_required"):
+            if result.get("interrupt"):
+                # Coding agent paused to ask the user a question
                 state["requires_user_input"] = True
-                state["pending_action"] = "provide_confluence_link"
-                state[
-                    "final_response"
-                ] = """The coding agent needs additional information.
-
-Please provide the Confluence design document link that contains the detailed requirements for this ticket."""
+                state["pending_action"] = "coding_agent_interrupt"
+                state["final_response"] = result["interrupt"].get(
+                    "question", "The coding agent needs your input."
+                )
+            elif result.get("response"):
+                state["final_response"] = result["response"]
             else:
-                state["final_response"] = self._format_coding_result(coding_result)
+                state["error_message"] = "Coding agent returned no response."
 
         except Exception as e:
             state["error_message"] = f"Error invoking coding agent: {str(e)}"
 
         return state
 
-    def _handle_general_chat(self, state: SupervisorState) -> SupervisorState:
-        """Handle general chat queries"""
+    async def _handle_general_chat(self, state: SupervisorState) -> SupervisorState:
+        """Delegate general chat to GeneralChatAgent."""
         try:
-            chat_prompt = f"""
-            You are a helpful AI assistant that specializes in:
-
-            🔍 **Search Operations:**
-            - Finding Confluence documentation and pages
-            - Looking up Jira tickets and issues
-            - Searching for specific information across systems
-
-            💻 **Code Generation:**
-            - Generating code from Jira ticket requirements
-            - Following development standards and best practices
-            - Integrating with GitLab for code management
-
-            User question: {state['enhanced_question'] or state['user_input']}
-
-            Provide a helpful response. If the user wants to search for something or generate code, guide them on how to ask more specifically.
-
-            Examples of what you can help with:
-            - "Search for API documentation"
-            - "Find ticket PROJ-123"
-            - "Generate code for DEV-456"
-            - "Look for confluence pages about deployment"
-            """
-
-            response = self.llm.invoke([HumanMessage(content=chat_prompt)])
-            state["final_response"] = response.content
-
+            user_query = state["enhanced_question"] or state["user_input"]
+            state["final_response"] = await self.general_chat_agent.chat(user_query)
         except Exception as e:
             state["error_message"] = f"Error in general chat: {str(e)}"
-
         return state
 
     def _request_user_input(self, state: SupervisorState) -> SupervisorState:
