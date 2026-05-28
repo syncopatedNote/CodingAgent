@@ -5,10 +5,9 @@ WORKDIR /app
 # Install system deps needed for some python packages
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential libpq-dev git && rm -rf /var/lib/apt/lists/*
 
-# Install Python deps for the RAG worker only
-# (keep service-level deps separate; worker should install RAG/requirements.txt)
-COPY RAG/requirements.txt /tmp/requirements-rag.txt
-RUN pip install --no-cache-dir -r /tmp/requirements-rag.txt
+# Install Python deps from the unified root requirements file
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 # Copy entire repository so worker has access to framework_base and other modules
 COPY . /app

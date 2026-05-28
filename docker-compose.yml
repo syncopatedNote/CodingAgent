@@ -85,6 +85,8 @@ services:
       # ChromaDB Vector Store
       CHROMA_SERVER_HOST: chroma
       CHROMA_SERVER_HTTP_PORT: ${CHROMA_SERVER_HTTP_PORT:-8000}
+      # Redis docstore (used by MultiVectorRetriever in general chat)
+      RAG_REDIS_URL: ${RAG_REDIS_URL:-redis://redis:6379/0}
     volumes:
       - .:/app
     depends_on:
@@ -93,6 +95,7 @@ services:
       - mcp-context7
       - litellm
       - chroma
+      - redis
     networks:
       - supervisor-network
     restart: unless-stopped
@@ -143,7 +146,7 @@ services:
       ANONYMIZED_TELEMETRY: "false"
       ALLOW_RESET: "false"
     volumes:
-      - chroma_db:/chroma/chroma
+      - chroma_db:/data
     networks:
       - supervisor-network
     restart: unless-stopped
@@ -210,8 +213,8 @@ services:
   # RAG Upload Service
   rag-service:
     build:
-      context: ./RAG
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: RAG/Dockerfile
     container_name: rag-service
     ports:
       - "8001:8001"
