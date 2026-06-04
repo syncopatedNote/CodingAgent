@@ -1,8 +1,7 @@
 from typing import Optional, Union
 from settings import settings
 from langchain_community.llms.ollama import Ollama
-from langchain_community.llms.bedrock import Bedrock
-from langchain_community.chat_models import BedrockChat
+from langchain_aws import ChatBedrockConverse
 from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
 from logger import setup_logger
@@ -21,22 +20,7 @@ class LLMFactory:
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         **kwargs,
-    ) -> Union[Ollama, ChatOllama, Bedrock, BedrockChat, ChatOpenAI]:
-        """
-        Create and return an LLM instance based on the provider and model.
-
-        Args:
-            provider (str): The LLM provider ('ollama' or 'bedrock')
-            model_name (str): Name of the model to use
-            model_type (str): Type of model interface ('completion' or 'chat')
-            temperature (float): Temperature for response generation
-            max_tokens (int, optional): Maximum tokens in the response
-            **kwargs: Additional arguments for specific providers
-
-        Returns:
-            Union[Ollama, ChatOllama, Bedrock, BedrockChat]: Configured
-            LLM instance
-        """
+    ) -> Union[Ollama, ChatOllama, ChatBedrockConverse, ChatOpenAI]:
         try:
             if provider.lower() == "ollama":
                 if model_type.lower() == "chat":
@@ -49,22 +33,12 @@ class LLMFactory:
                     )
 
             elif provider.lower() == "bedrock":
-                if model_type.lower() == "chat":
-                    return LLMFactory._create_bedrock(
-                        model_name=model_name,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        model_type="chat",
-                        **kwargs,
-                    )
-                else:
-                    return LLMFactory._create_bedrock(
-                        model_name=model_name,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        model_type="completion",
-                        **kwargs,
-                    )
+                return LLMFactory._create_bedrock(
+                    model_name=model_name,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    **kwargs,
+                )
             elif provider.lower() == "litellm":
                 return LLMFactory._create_litellm_chat(
                     model_name=model_name,
@@ -146,60 +120,30 @@ class LLMFactory:
         model_name: str,
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
-        model_type: str = "completion",
         **kwargs,
-    ) -> Union[Bedrock, BedrockChat]:
-        """Create a Bedrock instance"""
+    ) -> ChatBedrockConverse:
+        """Create a Bedrock instance using the Converse API (supports all models)"""
         import boto3
 
-        model_id_mapping = {
-            "claude3": {
-                "model_id": "anthropic.claude-3-sonnet-20240229-v1:0",
-                "anthropic_version": "bedrock-2023-05-31",
-            },
-            "claude2": {
-                "model_id": "anthropic.claude-v2",
-                "anthropic_version": "bedrock-2023-05-31",
-            },
-            "claude-instant": {
-                "model_id": "anthropic.claude-instant-v1",
-                "anthropic_version": "bedrock-2023-05-31",
-            },
-            "titan": {"model_id": "amazon.titan-text-express-v1"},
-            "llama2": {"model_id": "meta.llama2-70b-chat-v1"},
-        }
+        region_name = kwargs.get("region_name") or settings.aws_region
 
-        model_config = model_id_mapping.get(model_name.lower())
-        if model_config:
-            model_id = model_config["model_id"]
-            anthropic_version = model_config.get("anthropic_version")
-        else:
-            model_id = model_name
-            # Detect if it's an anthropic model by checking the model_id
-            anthropic_version = (
-                "bedrock-2023-05-31" if "anthropic" in model_name.lower() else None
-            )
-        region_name = kwargs.get("region_name", "us-east-1")
-
-        # Create boto3 client for Bedrock
         session_kwargs = {}
         if kwargs.get("profile_name"):
             session_kwargs["profile_name"] = kwargs.get("profile_name")
+        if settings.aws_access_key_id:
+            session_kwargs["aws_access_key_id"] = settings.aws_access_key_id
+        if settings.aws_secret_access_key:
+            session_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
 
         session = boto3.Session(**session_kwargs)
         client = session.client(service_name="bedrock-runtime", region_name=region_name)
 
-        model_kwargs = {
+        converse_kwargs: dict = {
+            "client": client,
+            "model": model_name,
             "temperature": temperature,
         }
-
-        # Only add max_tokens if provided
         if max_tokens:
-            model_kwargs["max_tokens"] = max_tokens
+            converse_kwargs["max_tokens"] = max_tokens
 
-        if anthropic_version and model_type == "chat":
-            return BedrockChat(
-                client=client, model_id=model_id, model_kwargs=model_kwargs
-            )
-        else:
-            return Bedrock(client=client, model_id=model_id, model_kwargs=model_kwargs)
+        return ChatBedrockConverse(**converse_kwargs)
