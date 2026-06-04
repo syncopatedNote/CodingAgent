@@ -238,8 +238,11 @@ services:
   redis:
     image: redis:7
     container_name: rag-redis
+    command: redis-server --appendonly yes
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
     networks:
       - supervisor-network
     restart: unless-stopped
@@ -328,6 +331,8 @@ services:
 
 volumes:
   chroma_db:
+    driver: local
+  redis_data:
     driver: local
 
 networks:

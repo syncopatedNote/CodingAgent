@@ -95,7 +95,7 @@ class GeneralChatAgent:
                 vectorstore=vectorstore,
                 docstore=docstore,
                 id_key=_ID_KEY,
-                search_kwargs={"k": 10},
+                search_kwargs={"k": 5},
             )
             docs = await retriever.ainvoke(query)
             if docs:

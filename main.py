@@ -16,6 +16,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from logger import setup_logger
+from routes.documents_routes import router as documents_router
 from routes.mcp_routes import router as mcp_router
 from routes.supervisor_routes import (
     router as supervisor_router,
@@ -72,6 +73,7 @@ app.add_middleware(
 
 app.include_router(mcp_router)
 app.include_router(supervisor_router)
+app.include_router(documents_router)
 
 
 # ==================== API Endpoints ====================
@@ -134,6 +136,8 @@ async def root():
             "health": "/api/health",
             "supervisor_chat": "/api/supervisor/chat",
             "supervisor_agent": "/api/supervisor/agent",
+            "list_documents": "/api/documents",
+            "delete_document": "/api/documents/{document_name}",
         },
     }
 

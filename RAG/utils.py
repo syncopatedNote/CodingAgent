@@ -116,10 +116,59 @@ def display_base64_image(base64_code):
 
 
 def extract_text_from_pdf(filepath: str = None, pages: Optional[str] = "all") -> list:
+    """Extract text from each PDF page, including form field values.
+
+    page.get_text() only reads the content stream and silently skips AcroForm
+    widget annotations (text inputs, checkboxes). We collect those separately
+    via page.widgets() and merge both sources by visual position so the
+    reconstructed text reads in natural top-to-bottom, left-to-right order.
+    """
     doc = pymupdf.open(filepath)
     num_pages = len(doc)
-    text = []
+    result = []
+    LINE_TOL = 5  # points — spans within this vertical distance share a line
+
     for page_num in tqdm(range(num_pages), desc="Processing PDF pages"):
         page = doc[page_num]
-        text.append({"page": page_num, "type": "text", "text": page.get_text()})
-    return text
+        items = []  # (y0, x0, text)
+
+        # Regular text spans with exact bounding boxes
+        for block in page.get_text("dict")["blocks"]:
+            if block.get("type") != 0:  # skip image blocks
+                continue
+            for line in block.get("lines", []):
+                for span in line.get("spans", []):
+                    t = span["text"].strip()
+                    if t:
+                        bbox = span["bbox"]
+                        items.append((bbox[1], bbox[0], t))
+
+        # Form field values (AcroForm widgets — invisible to get_text)
+        for widget in page.widgets() or []:
+            val = widget.field_value
+            if val is not None and str(val).strip():
+                r = widget.rect
+                items.append((r.y0, r.x0, str(val).strip()))
+
+        # Sort by bucketed y (line grouping) then x (left-to-right)
+        items.sort(key=lambda it: (round(it[0] / LINE_TOL) * LINE_TOL, it[1]))
+
+        # Group into visual lines and reconstruct as plain text
+        lines = []
+        cur_y = None
+        cur_parts = []
+        for y, _x, t in items:
+            bucketed = round(y / LINE_TOL) * LINE_TOL
+            if cur_y is None or abs(bucketed - cur_y) > LINE_TOL:
+                if cur_parts:
+                    lines.append(" ".join(cur_parts))
+                cur_y = bucketed
+                cur_parts = [t]
+            else:
+                cur_parts.append(t)
+        if cur_parts:
+            lines.append(" ".join(cur_parts))
+
+        result.append({"page": page_num, "type": "text", "text": "\n".join(lines)})
+
+    return result
