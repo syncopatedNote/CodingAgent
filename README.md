@@ -1,4 +1,4 @@
-# Coding Agent - Enterprise AI Assistant System
+# Cortex - Enterprise AI Assistant System
 
 An intelligent multi-agent AI assistant system designed for enterprise environments, featuring document processing, multi-modal RAG (Retrieval-Augmented Generation), automated code generation, and REST API capabilities. The system integrates with Confluence, Jira, and GitLab through the Model Context Protocol (MCP) to provide comprehensive workflow automation and intelligent assistance.
 
