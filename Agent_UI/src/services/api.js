@@ -73,10 +73,13 @@ export const runAgentChat = (messages, threadId, callbacks, options = {}) => {
     onError,
   } = callbacks;
 
+  const endpointUrl =
+    options.agentUrl ?? `${API_BASE_URL}/api/supervisor/agent`;
+
   const abortController = new AbortController();
 
   const agent = new HttpAgent({
-    url: `${API_BASE_URL}/api/supervisor/agent`,
+    url: endpointUrl,
   });
 
   agent.threadId = threadId;
@@ -142,6 +145,21 @@ export const runAgentChat = (messages, threadId, callbacks, options = {}) => {
     }
   };
 };
+
+/**
+ * Run a chat turn against the knowledge base search agent.
+ * Thin wrapper around runAgentChat pointing at /api/knowledge-base/agent.
+ * The KB search agent never issues interrupts, so onInterrupt is unused.
+ *
+ * @param {Array}    messages   – Full conversation history
+ * @param {string}   threadId   – Conversation thread identifier
+ * @param {object}   callbacks  – Same shape as runAgentChat callbacks
+ * @returns {Function} abort
+ */
+export const runKbSearchAgentChat = (messages, threadId, callbacks) =>
+  runAgentChat(messages, threadId, callbacks, {
+    agentUrl: `${API_BASE_URL}/api/knowledge-base/agent`,
+  });
 
 /**
  * Resume a previously interrupted agent run.
@@ -257,6 +275,7 @@ export const notifyUploadComplete = async (objectKey) => {
 export default {
   checkHealth,
   runAgentChat,
+  runKbSearchAgentChat,
   resumeAgent,
   getApiBaseUrl,
   getPresignedUrl,

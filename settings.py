@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     gitlab_project_id: str = Field(default="", alias="GITLAB_PROJECT_ID")
     development_rules_path: str = Field(default="", alias="DEVELOPMENT_RULES_PATH")
     development_rules_branch: str = Field(default="", alias="DEVELOPMENT_RULES_BRANCH")
+    # LLM providers info
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
     openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
