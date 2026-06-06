@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY RAG/main.py RAG/settings.py ./
 COPY RAG/routes/ ./routes/
 COPY RAG/services/ ./services/
+COPY RAG/workflows/ ./workflows/
 
 EXPOSE 8001
 

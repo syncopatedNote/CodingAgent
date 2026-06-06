@@ -85,17 +85,24 @@ services:
       # ChromaDB Vector Store
       CHROMA_SERVER_HOST: chroma
       CHROMA_SERVER_HTTP_PORT: ${CHROMA_SERVER_HTTP_PORT:-8000}
-      # Redis docstore (used by MultiVectorRetriever in general chat)
-      RAG_REDIS_URL: ${RAG_REDIS_URL:-redis://redis:6379/0}
+
+      # PostgreSQL docstore (used by MultiVectorRetriever in general chat)
+      POSTGRES_DSN: ${POSTGRES_DSN}
     volumes:
       - .:/app
     depends_on:
-      - mcp-atlassian
-      - mcp-gitlab
-      - mcp-context7
-      - litellm
-      - chroma
-      - redis
+      postgresql:
+        condition: service_healthy
+      mcp-atlassian:
+        condition: service_started
+      mcp-gitlab:
+        condition: service_started
+      mcp-context7:
+        condition: service_started
+      litellm:
+        condition: service_started
+      chroma:
+        condition: service_started
     networks:
       - supervisor-network
     restart: unless-stopped
@@ -157,8 +164,6 @@ services:
       retries: 3
       start_period: 20s
 
-  # Docstore now uses Redis (the same instance as RQ) — no MongoDB needed.
-
   # MCP Atlassian Server (Confluence & Jira)
   mcp-atlassian:
     image: ghcr.io/sooperset/mcp-atlassian:latest
@@ -210,6 +215,59 @@ services:
       retries: 3
       start_period: 40s
 
+  # PostgreSQL — Temporal backend + document chunk store
+  postgresql:
+    image: postgres:16
+    container_name: app-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-apppassword}
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - supervisor-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Temporal workflow orchestration server
+  temporal:
+    image: temporalio/auto-setup:1.26
+    container_name: temporal
+    ports:
+      - "7233:7233"
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:-apppassword}
+      POSTGRES_SEEDS: postgresql
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    networks:
+      - supervisor-network
+    restart: unless-stopped
+
+  # Temporal Web UI (replaces RQ Dashboard)
+  temporal-ui:
+    image: temporalio/ui:latest
+    container_name: temporal-ui
+    ports:
+      - "8080:8080"
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    depends_on:
+      - temporal
+    networks:
+      - supervisor-network
+    restart: unless-stopped
+
   # RAG Upload Service
   rag-service:
     build:
@@ -224,6 +282,9 @@ services:
       RAG_AWS_REGION: ${RAG_AWS_REGION:-us-east-1}
       S3_BUCKET_NAME: ${S3_BUCKET_NAME}
       PRESIGNED_URL_EXPIRY_SECONDS: ${PRESIGNED_URL_EXPIRY_SECONDS:-300}
+      TEMPORAL_HOST: ${TEMPORAL_HOST:-temporal:7233}
+    depends_on:
+      - temporal
     networks:
       - supervisor-network
     restart: unless-stopped
@@ -234,32 +295,20 @@ services:
       retries: 3
       start_period: 20s
 
-  # Redis for RQ
-  redis:
-    image: redis:7
-    container_name: rag-redis
-    command: redis-server --appendonly yes
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    networks:
-      - supervisor-network
-    restart: unless-stopped
-
-  # Worker for RQ jobs (ingestion)
+  # Temporal worker for document ingestion jobs
   rag-worker:
     build:
       context: .
       dockerfile: RAG/Dockerfile.rag_worker
     container_name: rag-worker
-    command: rq worker --url ${RAG_REDIS_URL:-redis://redis:6379/0}
     environment:
       RAG_AWS_ACCESS_KEY_ID: ${RAG_AWS_ACCESS_KEY_ID}
       RAG_AWS_SECRET_ACCESS_KEY: ${RAG_AWS_SECRET_ACCESS_KEY}
       RAG_AWS_REGION: ${RAG_AWS_REGION:-us-east-1}
       S3_BUCKET_NAME: ${S3_BUCKET_NAME}
-      RAG_REDIS_URL: ${RAG_REDIS_URL:-redis://redis:6379/0}
+      TEMPORAL_HOST: ${TEMPORAL_HOST:-temporal:7233}
+      # PostgreSQL docstore
+      POSTGRES_DSN: ${POSTGRES_DSN}
       # LLM (used by pdf_loader for chunk summarization via LiteLLM proxy)
       LLM_PROVIDER: ${LLM_PROVIDER:-litellm}
       LLM_MODEL_NAME: ${LLM_MODEL_NAME:-gpt-4o-mini}
@@ -270,26 +319,16 @@ services:
       CHROMA_SERVER_HOST: chroma
       CHROMA_SERVER_HTTP_PORT: ${CHROMA_SERVER_HTTP_PORT:-8000}
     depends_on:
-      - redis
-      - rag-service
-      - litellm
-      - chroma
-    networks:
-      - supervisor-network
-    restart: unless-stopped
-
-  # RQ Dashboard for monitoring jobs
-  rag-rq-dashboard:
-    image: python:3.11-slim
-    container_name: rag-rq-dashboard
-    ports:
-      - "9181:9181"
-    command: >-
-      sh -c "pip install --no-cache-dir rq-dashboard && rq-dashboard --redis-url ${RAG_REDIS_URL:-redis://redis:6379/0} --port 9181"
-    environment:
-      RAG_REDIS_URL: ${RAG_REDIS_URL:-redis://redis:6379/0}
-    depends_on:
-      - redis
+      postgresql:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+      rag-service:
+        condition: service_started
+      litellm:
+        condition: service_started
+      chroma:
+        condition: service_started
     networks:
       - supervisor-network
     restart: unless-stopped
@@ -332,7 +371,7 @@ services:
 volumes:
   chroma_db:
     driver: local
-  redis_data:
+  postgres_data:
     driver: local
 
 networks:
@@ -351,7 +390,8 @@ networks:
 # - RAG Upload Service:          http://localhost:8001
 # - LiteLLM Proxy:               http://localhost:4000
 # - ChromaDB:                    http://localhost:8002
-# - MongoDB Express (optional):  http://localhost:8081
+# - Temporal UI:                 http://localhost:8080
+# - Temporal gRPC:               localhost:7233
 # - MCP Atlassian:               http://localhost:3001
 # - MCP GitLab:                  http://localhost:3333
 # - MCP Context7:                http://localhost:3003

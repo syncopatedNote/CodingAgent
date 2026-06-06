@@ -11,7 +11,7 @@ from langchain.retrievers.multi_vector import MultiVectorRetriever
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
 from langchain_core.stores import BaseStore
-from framework_base.doc_store import RedisDocStore, get_document_store
+from framework_base.doc_store import PostgresDocStore, get_document_store
 from framework_base.llm_base import LLMFactory
 from framework_base.vector_store import get_vector_store
 from settings import settings
@@ -25,7 +25,7 @@ _ID_KEY = "doc_id"
 
 
 class _DocStoreAdapter(BaseStore[str, Document]):
-    """Adapts RedisDocStore (stores plain dicts) to BaseStore[str, Document].
+    """Adapts PostgresDocStore (stores plain dicts) to BaseStore[str, Document].
 
     MultiVectorRetriever requires BaseStore[str, Document]. The ingest pipeline
     stores raw dicts so that table HTML and page numbers survive JSON round-trips.
@@ -33,7 +33,7 @@ class _DocStoreAdapter(BaseStore[str, Document]):
     type and page metadata in Document.metadata for use in context formatting.
     """
 
-    def __init__(self, inner: RedisDocStore) -> None:
+    def __init__(self, inner: PostgresDocStore) -> None:
         self._inner = inner
 
     def mget(self, keys: Sequence[str]) -> List[Optional[Document]]:

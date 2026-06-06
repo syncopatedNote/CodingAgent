@@ -55,6 +55,9 @@ class Settings(BaseSettings):
         default="http://localhost:11434", alias="OLLAMA_BASE_URL"
     )
 
+    # PostgreSQL docstore
+    postgres_dsn: str = Field(alias="POSTGRES_DSN")
+
     # Chroma (vector DB) Configuration (hosted service only)
     chroma_server_host: str = Field(default="", alias="CHROMA_SERVER_HOST")
     chroma_server_http_port: int = Field(default=0, alias="CHROMA_SERVER_HTTP_PORT")

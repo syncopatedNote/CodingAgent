@@ -1,21 +1,21 @@
 import logging
 import os
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from services.s3_service import generate_presigned_post, verify_object_exists
 
-from redis import Redis
-from rq import Queue
-from rq.job import Job
+from temporalio.client import Client
+from workflows.ingestion_workflow import IngestionWorkflow
 
 logger = logging.getLogger(__name__)
 
-
 router = APIRouter(prefix="/upload", tags=["Upload"])
 
+_temporal_client: Optional[Client] = None
+_active_handles: dict[str, Any] = {}  # activity_id -> ActivityHandle
 
 ALLOWED_CONTENT_TYPES = {
     "application/pdf",
@@ -23,6 +23,14 @@ ALLOWED_CONTENT_TYPES = {
     "text/markdown",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
+
+
+async def _get_client() -> Client:
+    global _temporal_client
+    if _temporal_client is None:
+        temporal_host = os.getenv("TEMPORAL_HOST", "temporal:7233")
+        _temporal_client = await Client.connect(temporal_host)
+    return _temporal_client
 
 
 class PresignedUrlRequest(BaseModel):
@@ -37,7 +45,9 @@ class PresignedUrlResponse(BaseModel):
 
 
 @router.post("/presigned-url", response_model=PresignedUrlResponse)
-async def get_presigned_url(request: PresignedUrlRequest) -> PresignedUrlResponse:
+async def get_presigned_url(
+    request: PresignedUrlRequest,
+) -> PresignedUrlResponse:
     """
     Request a presigned S3 POST URL for a file upload.
 
@@ -50,7 +60,10 @@ async def get_presigned_url(request: PresignedUrlRequest) -> PresignedUrlRespons
     if request.content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(
             status_code=415,
-            detail=f"Unsupported content type. Allowed: {sorted(ALLOWED_CONTENT_TYPES)}",
+            detail=(
+                f"Unsupported content type. "
+                f"Allowed: {sorted(ALLOWED_CONTENT_TYPES)}"
+            ),
         )
 
     try:
@@ -73,8 +86,8 @@ class UploadCompleteRequest(BaseModel):
 async def upload_complete(request: UploadCompleteRequest):
     """Called by the frontend after a successful S3 upload.
 
-    Verifies the object exists in S3, enqueues an ingestion job and
-    returns a job id the client can poll.
+    Fires a standalone Temporal activity and immediately returns the activity
+    id. The actual ingestion runs on rag-worker — this service does not wait.
     """
     bucket = request.bucket or os.getenv("S3_BUCKET_NAME")
     if not bucket:
@@ -86,32 +99,47 @@ async def upload_complete(request: UploadCompleteRequest):
         logger.error("Uploaded object not found: %s/%s", bucket, request.object_key)
         raise HTTPException(status_code=404, detail="Uploaded object not found")
 
-    # Enqueue ingestion job using RQ + Redis
-    redis_url = os.getenv("RAG_REDIS_URL", "redis://redis:6379/0")
-    redis_conn = Redis.from_url(redis_url)
-    q = Queue(connection=redis_conn)
+    client = await _get_client()
+    workflow_id = f"ingest-{request.object_key}"
 
-    # Enqueue the ingest task by import path. The worker image must include
-    # the full repo so it can import `RAG.ingest.ingest_file` when executing.
-    job = q.enqueue(
-        "RAG.ingest.ingest_file", bucket, request.object_key, job_timeout=3600
+    handle = await client.start_workflow(
+        IngestionWorkflow.run,
+        args=[bucket, request.object_key],
+        id=workflow_id,
+        task_queue="rag-ingestion",
     )
 
-    return {"job_id": job.id, "status_url": f"/upload/status/{job.id}"}
+    # Store the handle for status queries — no waiting here.
+    _active_handles[workflow_id] = handle
+    return {
+        "job_id": workflow_id,
+        "status_url": f"/upload/status/{workflow_id}",
+    }
 
 
 @router.get("/status/{job_id}")
 async def upload_status(job_id: str):
-    redis_url = os.getenv("RAG_REDIS_URL", "redis://redis:6379/0")
-    redis_conn = Redis.from_url(redis_url)
-    try:
-        job = Job.fetch(job_id, connection=redis_conn)
-    except Exception:
+    """Non-blocking status check — describe() is a quick server query."""
+    handle = _active_handles.get(job_id)
+    if handle is None:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    try:
+        desc = await handle.describe()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    raw = str(desc.status).lower()
+    if "completed" in raw:
+        status = "finished"
+    elif any(s in raw for s in ("failed", "timed_out", "canceled")):
+        status = "failed"
+    else:
+        status = "started"
 
     return {
         "job_id": job_id,
-        "status": job.get_status(),
-        "result": job.result if job.is_finished else None,
-        "exc_info": job.exc_info,
+        "status": status,
+        "result": None,
+        "exc_info": None,
     }

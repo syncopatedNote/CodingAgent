@@ -1,62 +1,97 @@
-import json
-import os
 from typing import Any, Dict, Iterator, List, Optional, Sequence
 
+import psycopg
+from psycopg.types.json import Jsonb
 from langchain_core.stores import BaseStore
-from redis import Redis
+
+from settings import settings
 
 
-class RedisDocStore(BaseStore[str, Dict[str, Any]]):
-    """Redis-backed document store keyed by string IDs.
+class PostgresDocStore(BaseStore[str, Dict[str, Any]]):
+    """PostgreSQL-backed document store keyed by string IDs.
 
     Used by MultiVectorRetriever to look up the original chunk after a vector
-    search returns the matching summary. Values are JSON-encoded dicts.
-    Keys are namespaced with `key_prefix` so the docstore doesn't collide
-    with other Redis users in the same instance (e.g. RQ jobs).
+    search returns the matching summary. Values are stored as JSONB.
+    Collection-level isolation is handled via the `collection` column so a
+    single table serves all knowledge-base namespaces.
     """
 
-    def __init__(
-        self,
-        redis_url: str = "redis://127.0.0.1:6379/0",
-        key_prefix: str = "docstore:documents:",
-    ):
-        self.client = Redis.from_url(redis_url)
-        self.key_prefix = key_prefix
+    def __init__(self, dsn: str, collection: str = "documents"):
+        self.dsn = dsn
+        self.collection = collection
+        self._ensure_table()
 
-    def _k(self, key: str) -> str:
-        return f"{self.key_prefix}{key}"
+    def _conn(self) -> psycopg.Connection:
+        return psycopg.connect(self.dsn, autocommit=True)
+
+    def _ensure_table(self) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS document_chunks (
+                    id          TEXT        NOT NULL,
+                    collection  TEXT        NOT NULL DEFAULT 'documents',
+                    data        JSONB       NOT NULL,
+                    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    PRIMARY KEY (id, collection)
+                )
+            """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_document_chunks_collection "
+                "ON document_chunks (collection)"
+            )
 
     def mget(self, keys: Sequence[str]) -> List[Optional[Dict[str, Any]]]:
         if not keys:
             return []
-        raw = self.client.mget([self._k(k) for k in keys])
-        return [json.loads(v) if v is not None else None for v in raw]
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, data FROM document_chunks "
+                "WHERE collection = %s AND id = ANY(%s)",
+                (self.collection, list(keys)),
+            ).fetchall()
+        row_map = {row[0]: row[1] for row in rows}
+        return [row_map.get(k) for k in keys]
 
     def mset(self, key_value_pairs: Sequence[tuple[str, Dict[str, Any]]]) -> None:
         if not key_value_pairs:
             return
-        pipe = self.client.pipeline()
-        for key, value in key_value_pairs:
-            pipe.set(self._k(key), json.dumps(value))
-        pipe.execute()
+        with self._conn() as conn, conn.cursor() as cur:
+            cur.executemany(
+                """
+                INSERT INTO document_chunks (id, collection, data)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (id, collection)
+                DO UPDATE SET data = EXCLUDED.data
+                """,
+                [(k, self.collection, Jsonb(v)) for k, v in key_value_pairs],
+            )
 
     def mdelete(self, keys: Sequence[str]) -> None:
         if not keys:
             return
-        self.client.delete(*[self._k(k) for k in keys])
+        with self._conn() as conn:
+            conn.execute(
+                "DELETE FROM document_chunks " "WHERE collection = %s AND id = ANY(%s)",
+                (self.collection, list(keys)),
+            )
 
     def yield_keys(self, prefix: Optional[str] = None) -> Iterator[str]:
-        pattern = f"{self.key_prefix}{prefix or ''}*"
-        for raw_key in self.client.scan_iter(match=pattern):
-            key = raw_key.decode("utf-8") if isinstance(raw_key, bytes) else raw_key
-            yield key[len(self.key_prefix) :]
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id FROM document_chunks "
+                "WHERE collection = %s AND id LIKE %s",
+                (self.collection, f"{prefix or ''}%"),
+            ).fetchall()
+        for row in rows:
+            yield row[0]
 
 
-def get_document_store(collection_name: Optional[str] = None) -> RedisDocStore:
-    """Return a RedisDocStore namespaced under the given collection.
-
-    Reuses RAG_REDIS_URL — same Redis instance as RQ, isolated by key prefix.
-    """
-    redis_url = os.getenv("RAG_REDIS_URL", "redis://127.0.0.1:6379/0")
-    prefix = f"docstore:{collection_name or 'documents'}:"
-    return RedisDocStore(redis_url=redis_url, key_prefix=prefix)
+def get_document_store(
+    collection_name: Optional[str] = None,
+) -> PostgresDocStore:
+    """Return a PostgresDocStore namespaced to the given collection."""
+    return PostgresDocStore(
+        dsn=settings.postgres_dsn, collection=collection_name or "documents"
+    )

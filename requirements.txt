@@ -256,5 +256,5 @@ zstandard==0.23.0
 langchain-openai
 langchain-google-genai
 boto3==1.42.9
-redis>=4.0.0
-rq>=1.0.0
+temporalio>=1.7.0
+psycopg[binary]>=3.1
