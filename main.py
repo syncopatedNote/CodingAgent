@@ -23,6 +23,10 @@ from routes.supervisor_routes import (
     initialize_agent,
     get_supervisor_agent,
 )
+from routes.knowledge_base_routes import (
+    router as kb_router,
+    initialize_kb_search_agent,
+)
 
 logger = setup_logger(__name__)
 
@@ -34,6 +38,7 @@ logger = setup_logger(__name__)
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events"""
     initialize_agent()
+    initialize_kb_search_agent()
     logger.info("Supervisor API service started")
     yield
     logger.info("Supervisor API service shutting down")
@@ -74,6 +79,7 @@ app.add_middleware(
 app.include_router(mcp_router)
 app.include_router(supervisor_router)
 app.include_router(documents_router)
+app.include_router(kb_router)
 
 
 # ==================== API Endpoints ====================
@@ -138,6 +144,7 @@ async def root():
             "supervisor_agent": "/api/supervisor/agent",
             "list_documents": "/api/documents",
             "delete_document": "/api/documents/{document_name}",
+            "kb_search_agent": "/api/knowledge-base/agent",
         },
     }
 

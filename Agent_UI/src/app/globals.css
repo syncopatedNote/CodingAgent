@@ -131,3 +131,39 @@ body {
 textarea {
   field-sizing: content;
 }
+
+/* ── Wired Brain Loader ── */
+@keyframes brainSigFlow {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -72; }
+}
+
+@keyframes brainNodeGlow {
+  0%, 100% { opacity: 0.25; }
+  50%       { opacity: 1; }
+}
+
+@keyframes brainFadeIn {
+  from { opacity: 0; transform: scale(0.85); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.wired-brain {
+  animation: brainFadeIn 0.35s ease-out forwards;
+}
+
+.brain-sig-l {
+  animation: brainSigFlow 1.8s linear infinite;
+}
+.brain-sig-r {
+  animation: brainSigFlow 2.2s linear infinite;
+  animation-delay: -0.9s;
+}
+
+.brain-node {
+  animation: brainNodeGlow 2s ease-in-out infinite;
+}
+.brain-node.n0 { animation-delay: 0s; }
+.brain-node.n1 { animation-delay: 0.5s; }
+.brain-node.n2 { animation-delay: 1s; }
+.brain-node.n3 { animation-delay: 1.5s; }

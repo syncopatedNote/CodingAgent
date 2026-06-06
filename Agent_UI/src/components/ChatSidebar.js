@@ -91,6 +91,14 @@ export default function ChatSidebar({ isOpen, onClose, onNewChat, onSelectExampl
             <Upload className="w-4 h-4" />
             Upload Documents for RAG
           </Link>
+          <Link
+            href="/knowledge-base"
+            onClick={onClose}
+            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg border border-dashed border-border dark:border-border-dark hover:bg-primary/5 hover:border-primary/40 dark:hover:bg-primary/10 transition-colors text-sm font-medium text-muted hover:text-foreground"
+          >
+            <Search className="w-4 h-4" />
+            Search Knowledge Base
+          </Link>
         </div>
 
         {/* Scrollable content */}

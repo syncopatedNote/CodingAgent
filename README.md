@@ -1,533 +1,611 @@
 # Cortex - Enterprise AI Assistant System
 
-An intelligent multi-agent AI assistant system designed for enterprise environments, featuring document processing, multi-modal RAG (Retrieval-Augmented Generation), automated code generation, and REST API capabilities. The system integrates with Confluence, Jira, and GitLab through the Model Context Protocol (MCP) to provide comprehensive workflow automation and intelligent assistance.
+An intelligent multi-agent AI assistant designed for enterprise environments. It combines a supervisor agent that routes tasks across specialised sub-agents, a fully asynchronous RAG pipeline backed by Temporal, PostgreSQL, and ChromaDB, and deep integrations with Confluence, Jira, GitLab, and GitHub through the Model Context Protocol (MCP).
 
-## 🚀 Features
+## Features
 
 ### Multi-Agent Architecture
-- **Supervisor Agent**: Intelligent task routing and orchestration with confidence-based classification
-- **Search Agent**: Advanced search across Confluence, Jira, and document repositories with semantic retrieval
-- **Coding Agent**: Automated code generation from Jira tickets with GitLab integration
-- **Question Enhancer**: Context-aware query enhancement for improved retrieval
+- **Supervisor Agent**: LangGraph-based orchestrator that classifies every request (code generation, search, knowledge-base lookup, general chat) and delegates to the right sub-agent
+- **Search Agent**: Searches Confluence, Jira, GitLab, and GitHub via MCP tools
+- **Knowledge Base Search Agent**: Runs vector search against ingested documents, fetches original chunks from PostgreSQL, and returns grounded answers with citations
+- **Coding Agent**: Reads Jira tickets, generates code, creates branches and merge requests on GitLab via MCP
+- **General Chat Agent**: Handles open-ended conversation directly with the LLM
+- **Question Enhancer**: Rewrites ambiguous follow-up questions using conversation history before routing
 
-### REST API Service
-- **FastAPI Backend**: Production-ready REST API for supervisor agent
-- **Interactive Documentation**: Automatic OpenAPI/Swagger documentation at `/api/docs`
-- **Streaming Support**: Server-Sent Events (SSE) for real-time responses
-- **CORS Enabled**: Cross-origin support for frontend integration
-- **Docker Compose Deployment**: Complete containerized setup with all dependencies
-
-### Document Processing & RAG
-- **Multi-modal PDF Processing**: Extract and process text, tables, and images from PDF documents
-- **Confluence Integration**: Process Confluence pages with images, tables, and hierarchical content
-- **Intelligent Summarization**: AI-powered summarization of documents, tables, and images
-- **Vector Storage**: ChromaDB-based vector storage for efficient similarity search
-- **Multi-Vector Retrieval**: Advanced retrieval system supporting text, tables, and images
-- **MongoDB Document Store**: Persistent storage for retrieved documents and metadata
+### Document Ingestion & RAG
+- **Direct-to-S3 uploads**: Browser gets a presigned POST URL and uploads files directly — no credentials in the browser
+- **Temporal workflows**: Durable, retryable ingestion pipelines orchestrated by Temporal; failures replay without re-uploading
+- **Multi-vector retrieval**: LLM summaries go to ChromaDB (for semantic search); original chunks go to PostgreSQL (for precise retrieval)
+- **PDF processing**: Text extraction via PyMuPDF, table extraction via tabula-py, per-chunk summarisation via LLM
+- **Source citations**: Responses include `[Document X, page Y]` references
 
 ### Enterprise Integrations via MCP
-- **MCP (Model Context Protocol)**: Dual-transport architecture (SSE + stdio)
-- **Confluence Integration**: Search, retrieve, and process pages and documentation
-- **Jira Integration**: Ticket lookup, search, and automated workflows
-- **GitLab Integration**: Branch creation, code commits, and merge request management
-- **Extensible Architecture**: Easy addition of new MCP servers and tools
+- **Atlassian**: Confluence pages, Jira tickets, issue search
+- **GitLab**: File reads, branch creation, commit, merge requests
+- **GitHub**: Repository access, file browsing
+- **Context7**: Library documentation lookups
+
+### Frontend ↔ Backend Communication (AG-UI)
+- **AG-UI protocol** (`@ag-ui/client`): open event-based standard for streaming agent responses to the UI — typed events replace custom SSE/WebSocket code
+- **`AgUIMiddleware`**: custom Python middleware that handles `RUN_STARTED → STEP_STARTED/FINISHED → CUSTOM(metadata) → TEXT_MESSAGE streaming → RUN_FINISHED` lifecycle
+- **Interrupt / Resume**: agent can pause mid-run to ask the user a question, preserve its state, and resume exactly where it left off via `forwardedProps.resume`
+- **Abort support**: any in-flight stream can be cleanly cancelled from the frontend
 
 ### LLM Support
-- **Ollama Integration**: Local LLM deployment (Llama 3, Mistral, etc.)
-- **OpenAI Integration**: GPT-4, GPT-3.5 support via LiteLLM
-- **AWS Bedrock Support**: Claude, Titan, and other Bedrock models
-- **Multi-Provider Architecture**: Flexible LLM provider switching via unified factory
+- **LiteLLM proxy** (default): unified gateway supporting OpenAI, GitHub Models, Azure OpenAI, and more
+- **AWS Bedrock**: Claude, Titan, Nova models
+- **Anthropic direct**, **Google/GCP**, **OpenRouter**, **Ollama** (local)
+- Switched at runtime via `LLM_PROVIDER` / `LLM_MODEL_NAME` env vars
 
-## 🏗️ Architecture
+---
+
+## Architecture
 
 ```
-┌─────────────────┐    ┌─────────────────┐
-│  Agent UI       │    │  REST API       │
-│  (Port 3000)    │    │  (Port 8000)    │
-└─────────┬───────┘    └─────────┬───────┘
-          │                      │
-          └──────────┬───────────┘
-                                 │
-                    ┌─────────────▼─────────────┐
-                    │    Supervisor Agent       │
-                    │  (Task Classification &   │
-                    │      Routing)            │
-                    └─────────────┬─────────────┘
-                                 │
-                ┌────────────────┼────────────────┐
-                │                │                │
-    ┌───────────▼───────────┐   │   ┌───────────▼───────────┐
-    │    Search Agent       │   │   │    Coding Agent       │
-    │ - MCP Atlassian       │   │   │ - Jira via MCP        │
-    │ - Confluence Search   │   │   │ - Code Generation     │
-    │ - Jira Lookup        │   │   │ - GitLab via MCP      │
-    │ - Vector Store RAG    │   │   │ - Branch Management   │
-    └───────────────────────┘   │   └───────────────────────┘
-                                │
-                    ┌───────────▼───────────┐
-                    │   Framework Base      │
-                    │ - LLM Factory         │
-                    │ - Vector Store        │
-                    │ - Document Store      │
-                    │ - MCP Client          │
-                    └───────────┬───────────┘
-                                │
-            ┌───────────────────┼───────────────────┐
-            │                   │                   │
-    ┌───────▼────────┐  ┌──────▼──────┐  ┌────────▼────────┐
-    │ MCP Atlassian  │  │ MCP GitLab  │  │    MongoDB      │
-    │ (Port 3000)    │  │ (Port 3001) │  │  (Port 27017)   │
-    └────────────────┘  └─────────────┘  └─────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                       Browser  (Agent UI)                            │
+│                       Next.js  ·  Port 3000                          │
+│                                                                      │
+│  HttpAgent (@ag-ui/client)          axios / XHR                      │
+│  ┌────────────────────────────┐     ┌──────────────────────────┐    │
+│  │ AG-UI event callbacks      │     │ REST / presigned S3 URLs │    │
+│  │ · onTextMessageContent     │     └──────────┬───────────────┘    │
+│  │ · onCustomEvent(metadata)  │                │                     │
+│  │ · onStepStarted/Finished   │                │                     │
+│  │ · onRunFinished / onError  │                │                     │
+│  │ · onInterrupt → resume     │                │                     │
+│  └──────────────┬─────────────┘                │                     │
+└─────────────────┼────────────────────────────  ┼ ────────────────────┘
+                  │  AG-UI protocol              │  HTTP
+                  │  (SSE event stream)          │
+       ┌──────────┴──────────┐        ┌──────────┴──────────┐
+       │   Supervisor API    │        │    RAG Service       │
+       │   FastAPI · 8000    │        │   FastAPI  · 8001    │
+       │                     │        │   presigned S3 URLs  │
+       │  ┌───────────────┐  │        │   Temporal client    │
+       │  │ AgUIMiddleware│  │        └──────────┬───────────┘
+       │  │ ─────────────│  │                   │ start workflow
+       │  │ RUN_STARTED  │  │                   ▼
+       │  │ STEP_START   │  │        ┌──────────────────────┐
+       │  │ CUSTOM(meta) │  │        │   Temporal Server    │
+       │  │ TEXT chunks  │  │        │      Port 7233       │
+       │  │ RUN_FINISHED │  │        │   UI  ·  Port 8080   │
+       │  │ (+ interrupt)│  │        └──────────┬───────────┘
+       │  └──────┬────────┘  │                   │ task queue
+       │         │           │                   ▼
+       │  ┌──────▼────────┐  │        ┌──────────────────────┐
+       │  │  Supervisor   │  │        │    RAG Worker         │
+       │  │   Agent       │  │        │  (Temporal worker)    │
+       │  │  (LangGraph)  │  │        │  S3 → PDF extract     │
+       │  └──┬──┬──┬──────┘  │        │  LLM summarise        │
+       └─────┼──┼──┼─────────┘        │  → Chroma + Postgres  │
+             │  │  │                  └──────────┬────────────┘
+             │  │  └──────────────┐              │
+             │  │                 ▼              │
+             │  │    ┌──────────────────────┐    │
+             │  │    │  MCP Servers         │    │
+             │  │    │  · Atlassian  · 3001 │    │
+             │  │    │  · GitLab     · 3333 │    │
+             │  │    │  · Context7   · 3003 │    │
+             │  │    │  .... and more       │    │
+             │  │    └──────────────────────┘    │
+             │  │                                │
+             │  ▼                                │
+             │ ┌──────────────────────────┐      │
+             │ │  ChromaDB  ·  Port 8002  │◄─────┘ (summaries + embeddings)
+             │ │  collection: "uploads"   │
+             │ └──────────────────────────┘
+             │
+             ▼
+┌─────────────────────────────────────────────────┐
+│                  PostgreSQL                      │
+│  document_chunks  (JSONB docstore)      ◄── RAG Worker writes chunks
+│  Temporal workflow history tables               │
+└─────────────────────────────────────────────────┘
+
+LiteLLM Proxy · Port 4000
+  Used by supervisor-api and rag-worker
+  Backed by GitHub Models / OpenAI / Azure / Bedrock
+
+AWS S3
+  Browser uploads directly via presigned POST URLs
+  RAG Worker downloads for processing
 ```
 
-### MCP Architecture
-- **Dual Transport**: SSE (production) and stdio (development)
-- **SSE Transport**: Persistent HTTP connections to MCP services
-- **stdio Transport**: On-demand Docker container execution
-- See [MCP_ARCHITECTURE.md](MCP_ARCHITECTURE.md) for detailed information
+### Document Ingestion Flow
 
-## 📋 Prerequisites
-
-- **Python 3.11+**
-- **Docker & Docker Compose** (for containerized deployment)
-- **Ollama** (optional, for local LLM deployment)
-- **MongoDB** (automatically managed in Docker Compose)
-- **ChromaDB** (automatically managed)
-
-## 🛠️ Installation
-
-### Option 1: Docker Compose (Recommended)
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd Coding_agent
-   ```
-
-2. **Configure environment variables**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration (see Configuration section below)
-   ```
-
-3. **Start all services**
-   ```bash
-   docker compose up -d
-   ```
-
-4. **Access the services**
-   - **Agent UI**: http://localhost:3000
-   - **REST API**: http://localhost:8000
-   - **API Docs**: http://localhost:8000/api/docs
-
-### Option 2: Local Development
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd Coding_agent
-   ```
-
-2. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Set up Ollama (if using local LLMs)**
-   ```bash
-   # Install Ollama (macOS/Linux)
-   curl -fsSL https://ollama.ai/install.sh | sh
-
-   # Pull required models
-   ollama pull llama3:8b
-   ollama pull nomic-embed-text
-   ```
-
-4. **Configure environment variables**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
-
-5. **Start MongoDB**
-   ```bash
-   brew services start mongodb/brew/mongodb-community
-   # or
-   sudo systemctl start mongod
-   ```
-
-## ⚙️ Configuration
-
-### Environment Variables
-
-Create a `.env` file with the following configuration:
-
-```env
-# LLM Configuration
-LLM_PROVIDER="ollama"          # Options: ollama, litellm, bedrock
-LLM_MODEL_NAME="llama3:8b"     # Model name for your provider
-LLM_MODEL_TYPE="chat"          # Usually "chat" for conversational models
-
-# Ollama Configuration (if using local Ollama)
-OLLAMA_BASE_URL="http://host.docker.internal:11434"  # For Docker
-# OLLAMA_BASE_URL="http://localhost:11434"           # For local dev
-
-# OpenAI Configuration (if using litellm with OpenAI)
-OPENAI_API_KEY="your-openai-api-key"
-
-# AWS Bedrock Configuration (if using bedrock provider)
-AWS_ACCESS_KEY_ID="your-aws-access-key"
-AWS_SECRET_ACCESS_KEY="your-aws-secret-key"
-AWS_REGION="us-east-1"
-
-# Confluence Configuration
-CONFLUENCE_URL="https://your-company.atlassian.net/wiki"
-CONFLUENCE_USERNAME="your-email@company.com"
-CONFLUENCE_API_TOKEN="your-confluence-api-token"
-CONFLUENCE_SSL_VERIFY="false"  # Set to "true" in production with valid certs
-
-# Jira Configuration
-JIRA_URL="https://your-company.atlassian.net"
-JIRA_PERSONAL_TOKEN="your-jira-personal-token"
-JIRA_SSL_VERIFY="false"        # Set to "true" in production with valid certs
-
-# GitLab Configuration
-GITLAB_PERSONAL_ACCESS_TOKEN="your-gitlab-token"
-GITLAB_API_URL="https://gitlab.example.com"
-GITLAB_PROJECT_ID="your-project-id"
-GITLAB_READ_ONLY_MODE="false"
-
-# MCP Configuration
-MCP_VERY_VERBOSE="true"        # Enable verbose logging for MCP
-
-# MCP Service URLs (for Docker Compose - SSE transport)
-MCP_ATLASSIAN_URL="http://mcp-atlassian:3000"
-MCP_GITLAB_URL="http://mcp-gitlab:3001"
-
-# MongoDB Configuration (optional, defaults work for Docker Compose)
-MONGODB_URI="mongodb://mongodb:27017"
-MONGODB_DATABASE="langchain_db"
+```
+1. Browser  →  POST /upload/presigned-url     (get S3 presigned POST)
+2. Browser  →  PUT  s3://bucket/uploads/…     (direct upload, no creds in browser)
+3. Browser  →  POST /upload/complete          (notify RAG service)
+4. RAG Svc  →  Temporal: start IngestionWorkflow(bucket, object_key)
+5. Worker   →  S3 download → PDF extract (PyMuPDF + tabula)
+6. Worker   →  LLM summarise each chunk / table
+7. Worker   →  ChromaDB  ← summaries + embeddings
+8. Worker   →  PostgreSQL ← original chunks (JSONB)
 ```
 
-### Transport Mode Selection
+### Knowledge-Base Query Flow
 
-The system automatically selects MCP transport based on configuration:
-
-- **SSE Transport** (Production): Used when `MCP_ATLASSIAN_URL` is set
-  - Persistent connections to MCP services
-  - Better performance and security
-  - Docker Compose default
-
-- **stdio Transport** (Development): Used when `MCP_ATLASSIAN_URL` is not set
-  - On-demand Docker container execution
-  - No persistent services required
-  - Local development fallback
-
-See [MCP_ARCHITECTURE.md](MCP_ARCHITECTURE.md) for detailed information.
-
-## 🚀 Quick Start
-
-### Using Docker Compose (Recommended)
-
-1. **Start all services**
-   ```bash
-   docker compose up -d
-   ```
-
-2. **Check service status**
-   ```bash
-   docker compose ps
-   docker compose logs -f supervisor-api
-   ```
-
-3. **Access the interfaces**
-   - **Agent UI**: http://localhost:3000
-   - **REST API**: http://localhost:8000
-   - **API Interactive Docs**: http://localhost:8000/api/docs
-
-4. **Test the API**
-   ```bash
-   # Health check
-   curl http://localhost:8000/api/health
-
-   # Chat request
-   curl -X POST http://localhost:8000/api/supervisor/chat \
-     -H "Content-Type: application/json" \
-     -d '{"user_input":"What can you help me with?"}'
-   ```
-
-### Using Local Development
-
-1. **Start MongoDB**
-   ```bash
-   brew services start mongodb/brew/mongodb-community
-   ```
-
-2. **Launch REST API**
-   ```bash
-   uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-   ```
-   Visit http://localhost:8000/api/docs
-
-### Document Processing (RAG Pipeline)
-
-#### Process PDF Documents
-
-1. **Add PDFs** to a directory (e.g., `old_stuff/pdf_files/`)
-
-2. **Run the PDF loader** (update file paths in script):
-   ```bash
-   python old_stuff/pdf_loader.py
-   ```
-
-#### Process Confluence Pages
-
-1. **Configure Confluence credentials** in `.env`
-
-2. **Update the loader script** with space key and page ID:
-   ```python
-   # In RAG/confluence_loader_new.py
-   CONFLUENCE_URL = "https://your-confluence.com"
-   SPACE_KEY = "YOUR_SPACE"
-   PAGE_ID = "123456"
-   ```
-
-3. **Run the loader**:
-   ```bash
-   python RAG/confluence_loader_new.py
-   ```
-
-## 💡 Usage Examples
-
-### Usage Examples
-
-**Search Operations:**
 ```
-User: "Find ticket PROJ-123"
-User: "Search for API documentation in Confluence"
-User: "Show me recent bugs in the DEV project"
+User query
+  → KBSearchAgent
+  → ChromaDB vector search  (top-k summaries)
+  → PostgreSQL docstore      (fetch original chunks by doc_id)
+  → LLM: synthesise answer with citations [Document X, page Y]
 ```
 
-**Code Generation:**
+---
+
+## AG-UI Protocol
+
+The frontend and backend communicate exclusively through the **AG-UI protocol** — an open, event-based standard that defines how AI agents stream structured events to user interfaces. This replaces ad-hoc SSE/WebSocket implementations with a typed event contract both sides agree on.
+
+### What AG-UI provides
+
+| Concern | Without AG-UI | With AG-UI |
+|---|---|---|
+| Streaming text | Custom chunked SSE parsing | `TEXT_MESSAGE_CONTENT` delta events |
+| Run lifecycle | Manual start/end signals | `RUN_STARTED` / `RUN_FINISHED` events |
+| Agent steps | Not visible to UI | `STEP_STARTED` / `STEP_FINISHED` events |
+| Metadata (task type, etc.) | Separate REST call | `CUSTOM` event with named payload |
+| Agent interrupts | Not supported | `RUN_FINISHED{outcome:"interrupt"}` + resume |
+| Aborting a run | Kill connection, undefined state | `abortController.abort()` — clean teardown |
+
+### How it is wired in this project
+
+**Backend — `ag_ui_middleware/middleware.py`**
+
+A custom `AgUIMiddleware` class wraps any agent callable and manages the full run lifecycle, producing a `StreamingResponse` from FastAPI:
+
 ```
-User: "Generate code for ticket CBP-8446"
-User: "Implement the feature described in DEV-789"
+RUN_STARTED
+  └─ STEP_STARTED("processing")
+       └─ [agent executes]
+  └─ STEP_FINISHED("processing")
+  └─ CUSTOM("task_analysis", {task_type, …})   ← metadata
+  └─ TEXT_MESSAGE_START
+       └─ TEXT_MESSAGE_CONTENT × N             ← word-by-word streaming
+  └─ TEXT_MESSAGE_END
+RUN_FINISHED                                   ← outcome: "success" or "interrupt"
 ```
 
-**General Chat:**
-```
-User: "What can you help me with?"
-User: "How do I integrate with the API?"
+Any API endpoint becomes a one-liner:
+
+```python
+from ag_ui_middleware import AgUIMiddleware
+
+ag_ui = AgUIMiddleware()
+
+@router.post("/agent")
+async def supervisor_agent_endpoint(input_data: RunAgentInput, request: Request):
+    return ag_ui.create_response(input_data, request, agent_fn=my_agent_fn)
 ```
 
-### REST API Examples
+The agent callable just returns an `AgentResult` — it never touches SSE or encoding:
 
-**Using cURL:**
+```python
+async def my_agent_fn(user_input, conversation_history, context) -> AgentResult:
+    response = await supervisor_agent.run(user_input, conversation_history)
+    return AgentResult(response=response, metadata={"task_type": "search"})
+```
+
+**Frontend — `Agent_UI/src/services/api.js`**
+
+`HttpAgent` from `@ag-ui/client` connects to the backend endpoint and fires typed callbacks:
+
+```js
+import { HttpAgent } from "@ag-ui/client";
+
+const agent = new HttpAgent({ url: `${API_BASE_URL}/api/supervisor/agent` });
+agent.messages = aguiMessages;   // full conversation history
+agent.threadId  = sessionId;
+
+agent.runAgent({ runId, tools: [], forwardedProps }, {
+  onTextMessageContentEvent: ({ event }) => appendDelta(event.delta),
+  onCustomEvent:             ({ event }) => setMetadata(event.value),
+  onStepStartedEvent:        ({ event }) => showStep(event.stepName),
+  onRunFinishedEvent:        ({ event }) => {
+    if (event.outcome === "interrupt") handleInterrupt(event.interrupt);
+    else markDone();
+  },
+  onRunErrorEvent:           ({ event }) => showError(event.message),
+});
+```
+
+### Interrupt / Resume flow
+
+When the coding agent needs user confirmation (e.g. "create this branch?"), it returns an `AgentResult` with an `InterruptData` payload. The middleware stores the in-flight state, and emits `RUN_FINISHED{outcome:"interrupt"}`. The frontend renders the question and, on user response, sends a new run with `forwardedProps.resume = { interruptId, payload }`. The middleware resolves the stored state and passes `context.is_resume = True` to the agent callable — no extra endpoints needed.
+
+```
+Agent needs input
+  → backend: InterruptManager.create(thread_id, interrupt, agent_state)
+  → frontend: onInterrupt({id, reason, payload})  ← show question to user
+
+User answers
+  → frontend: runAgentChat(messages, threadId, callbacks,
+               { resume: { interruptId, answer } })
+  → backend:  InterruptManager.resolve(thread_id, interrupt_id)
+  → agent callable receives context.is_resume = True
+```
+
+---
+
+## Services
+
+| Service | Port | Description |
+|---|---|---|
+| agent-ui | 3000 | Next.js frontend |
+| supervisor-api | 8000 | FastAPI — supervisor agent, search, docs management |
+| rag-service | 8001 | FastAPI — S3 presigned URLs, workflow trigger |
+| litellm | 4000 | LiteLLM proxy (OpenAI-compatible gateway) |
+| chroma | 8002 | ChromaDB vector store |
+| temporal | 7233 | Temporal workflow server (gRPC) |
+| temporal-ui | 8080 | Temporal web UI |
+| postgresql | 5432 | Docstore + Temporal backend |
+| mcp-atlassian | 3001 | MCP — Confluence & Jira |
+| mcp-gitlab | 3333 | MCP — GitLab |
+| mcp-context7 | 3003 | MCP — library docs |
+| rag-worker | — | Temporal worker (no exposed port) |
+
+---
+
+## Prerequisites
+
+- **Docker & Docker Compose** v2+
+- **Python 3.11+** (local dev only)
+- AWS account with an S3 bucket (for document uploads)
+- API keys for your chosen LLM provider
+
+---
+
+## Quick Start
+
+### Docker Compose (recommended)
 
 ```bash
-# Health check
-curl http://localhost:8000/api/health
+git clone <repository-url>
+cd Coding_agent
 
-# Simple chat
+cp .env.example .env
+# Edit .env — minimum required: LLM keys, AWS/S3 credentials, POSTGRES_DSN
+
+docker compose up -d
+```
+
+Services available after startup:
+
+| URL | Description |
+|---|---|
+| http://localhost:3000 | Agent UI |
+| http://localhost:8000/api/docs | Supervisor API (Swagger) |
+| http://localhost:8001/docs | RAG Service (Swagger) |
+| http://localhost:8080 | Temporal UI |
+| http://localhost:4000 | LiteLLM proxy |
+
+### Verify everything is running
+
+```bash
+docker compose ps
+docker compose logs -f supervisor-api
+docker compose logs -f rag-worker
+
+# Health checks
+curl http://localhost:8000/api/health
+curl http://localhost:8001/health
+```
+
+---
+
+## Configuration
+
+Copy `.env.example` to `.env` and fill in values. Key variables:
+
+```env
+# ── LLM ──────────────────────────────────────────────────────
+LLM_PROVIDER=litellm          # litellm | openai | bedrock | anthropic | azure | ollama
+LLM_MODEL_NAME=gpt-4o-mini
+LLM_MODEL_TYPE=chat
+
+LITELLM_PROXY_URL=http://litellm:4000
+LITELLM_MASTER_KEY=sk-1234
+
+# ── Database ─────────────────────────────────────────────────
+POSTGRES_DSN=postgresql://appname:apppassword@postgresql:port/app  #pragma: allowlist secret
+
+# ── Vector store ─────────────────────────────────────────────
+CHROMA_SERVER_HOST=chroma
+CHROMA_SERVER_HTTP_PORT=8000
+
+# ── RAG / S3 ─────────────────────────────────────────────────
+RAG_AWS_ACCESS_KEY_ID=...
+RAG_AWS_SECRET_ACCESS_KEY=...
+RAG_AWS_REGION=us-east-1
+S3_BUCKET_NAME=your-bucket-name
+
+# ── Temporal ─────────────────────────────────────────────────
+TEMPORAL_HOST=temporal:7233
+
+# ── Enterprise integrations ──────────────────────────────────
+CONFLUENCE_URL=https://your-company.atlassian.net/wiki
+CONFLUENCE_USERNAME=you@company.com
+CONFLUENCE_API_TOKEN=...
+
+JIRA_URL=https://your-company.atlassian.net
+JIRA_PERSONAL_TOKEN=...
+
+GITLAB_PERSONAL_ACCESS_TOKEN=...
+GITLAB_API_URL=https://gitlab.example.com
+GITLAB_PROJECT_ID=...
+
+GITHUB_TOKEN=...
+
+# ── MCP toggles ──────────────────────────────────────────────
+MCP_ATLASSIAN_ENABLED=true
+MCP_GITLAB_ENABLED=true
+MCP_GITHUB_ENABLED=true
+MCP_CONTEXT7_ENABLED=true
+
+# ── LangSmith tracing (optional) ─────────────────────────────
+LANGSMITH_TRACING=false
+LANGSMITH_API_KEY=...
+LANGSMITH_PROJECT=coding_agent
+```
+
+---
+
+## API Reference
+
+### Supervisor chat
+
+```bash
 curl -X POST http://localhost:8000/api/supervisor/chat \
   -H "Content-Type: application/json" \
   -d '{
-    "user_input": "Find information about PROJ-123",
-    "session_id": "my-session-1"
+    "user_input": "Find ticket PROJ-123",
+    "session_id": "my-session"
   }'
+```
 
-# Chat with history
+With conversation history:
+
+```bash
 curl -X POST http://localhost:8000/api/supervisor/chat \
   -H "Content-Type: application/json" \
   -d '{
     "user_input": "Tell me more about it",
     "conversation_history": [
-      {"role": "user", "content": "What is PROJ-123?"},
+      {"role": "user",      "content": "What is PROJ-123?"},
       {"role": "assistant", "content": "PROJ-123 is..."}
     ],
-    "session_id": "my-session-1"
+    "session_id": "my-session"
   }'
 ```
 
-**Using Python:**
+### Knowledge base search
+
+```bash
+curl -X POST http://localhost:8000/api/knowledge-base/agent \
+  -H "Content-Type: application/json" \
+  -d '{"query": "deployment checklist"}'
+```
+
+### Document management
+
+```bash
+# List ingested documents
+curl http://localhost:8000/api/documents
+
+# Delete a document (removes from Chroma + PostgreSQL)
+curl -X DELETE "http://localhost:8000/api/documents/my-doc.pdf"
+```
+
+### Document upload (RAG pipeline)
+
+```bash
+# 1. Request a presigned upload URL
+curl -X POST http://localhost:8001/upload/presigned-url \
+  -H "Content-Type: application/json" \
+  -d '{"filename": "spec.pdf", "content_type": "application/pdf"}'
+
+# 2. Upload directly to S3 using the fields returned above (multipart/form-data)
+
+# 3. Notify the RAG service to start ingestion
+curl -X POST http://localhost:8001/upload/complete \
+  -H "Content-Type: application/json" \
+  -d '{"object_key": "uploads/<uuid>/spec.pdf"}'
+
+# 4. Poll workflow status
+curl http://localhost:8001/upload/status/<workflow-id>
+```
+
+### Python client example
 
 ```python
 import requests
 
-# Simple request
-response = requests.post(
+resp = requests.post(
     "http://localhost:8000/api/supervisor/chat",
-    json={
-        "user_input": "Search for deployment documentation",
-        "session_id": "python-session"
-    }
+    json={"user_input": "Search for deployment docs", "session_id": "py-1"}
 )
-
-result = response.json()
-print(f"Task Type: {result['task_analysis']['task_type']}")
-print(f"Response: {result['response']}")
+data = resp.json()
+print(data["task_analysis"]["task_type"])  # SEARCH_OPERATION
+print(data["response"])
 ```
 
-**Using JavaScript/TypeScript:**
+---
 
-```typescript
-const response = await fetch('http://localhost:8000/api/supervisor/chat', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    user_input: 'Find ticket PROJ-123',
-    session_id: 'js-session'
-  })
-});
-
-const result = await response.json();
-console.log(result.response);
-```
-
-See [SUPERVISOR_API_GUIDE.md](SUPERVISOR_API_GUIDE.md) for complete API documentation.
-
-## 📁 Project Structure
+## Project Structure
 
 ```
 Coding_agent/
-├── agents/                     # Multi-agent system
-│   ├── supervisor_agent.py     # Main orchestration agent
-│   ├── search_agent.py         # Search and retrieval agent
-│   ├── langgraph_coding_agent.py         # Code generation agent (LangGraph)
-│   ├── question_enhancer_agent.py # Query enhancement
-│   ├── components/             # Modular agent components
+├── agents/
+│   ├── supervisor_agent.py          # LangGraph orchestrator — classifies & routes
+│   ├── search_agent.py              # MCP-backed search (Confluence, Jira, GitLab)
+│   ├── kb_search_agent.py           # RAG search — Chroma + PostgreSQL docstore
+│   ├── langgraph_coding_agent.py    # Code generation via MCP (GitHub/GitLab)
+│   ├── general_chat_agent.py        # Direct LLM conversation
+│   ├── question_enhancer_agent.py   # Rewrites follow-up questions from history
+│   ├── components/                  # Handler modules per integration
 │   │   ├── jira_handler.py
 │   │   ├── confluence_handler.py
 │   │   ├── gitlab_handler.py
 │   │   └── code_generator.py
-│   └── models/                 # Data models and schemas
+│   └── models/
 │       └── jira_response_model.py
-├── framework_base/             # Core framework
-│   ├── llm_base.py            # LLM factory and abstractions
-│   ├── vector_store.py        # Vector storage management
-│   ├── doc_store.py           # Document storage (MongoDB)
-│   └── multi_server_mcp_client.py # MCP client with dual transport
-├── RAG/                       # RAG pipeline implementations
-│   └── confluence_loader_new.py # Confluence data loader
-├── old_stuff/                 # Legacy implementations
-│   ├── pdf_loader.py          # PDF processing pipeline
-│   └── chat.py                # Simple chat interface
-├── chroma_db/                 # ChromaDB vector storage (auto-created)
-├── logs/                      # Application logs (auto-created)
-├── main.py                    # FastAPI REST API service
-├── settings.py                # Application settings and configuration
-├── logger.py                  # Logging configuration
-├── utils.py                   # Utility functions
-├── requirements.txt           # Python dependencies
-├── docker-compose.yml         # Docker Compose configuration
-├── dockerfile.api             # Dockerfile for API service
-├── README.md                  # This file
-├── SUPERVISOR_API_GUIDE.md    # Complete API documentation
-├── MCP_ARCHITECTURE.md        # MCP integration details
-└── .env.example               # Environment variables template
+│
+├── framework_base/
+│   ├── llm_base.py                  # LLMFactory — provider-agnostic LLM creation
+│   ├── vector_store.py              # ChromaDB client initialisation
+│   ├── doc_store.py                 # PostgresDocStore (psycopg3, JSONB)
+│   └── mcp_servers/
+│       └── registry.py              # MCP server registration & SSE transport
+│
+├── RAG/
+│   ├── main.py                      # RAG service FastAPI app
+│   ├── worker.py                    # Temporal worker entry point
+│   ├── ingest.py                    # Ingestion dispatcher (PDF, text)
+│   ├── constants.py                 # Metadata key constants
+│   ├── settings.py                  # RAG-specific settings (S3, Temporal)
+│   ├── loaders/
+│   │   └── pdf_loader.py            # PyMuPDF + tabula extraction, LLM summarisation
+│   ├── services/
+│   │   └── s3_service.py            # Presigned URL generation, S3 download
+│   ├── routes/
+│   │   └── upload_routes.py         # /upload/* endpoints
+│   ├── workflows/
+│   │   ├── ingestion_workflow.py    # Temporal workflow definition
+│   │   └── activities.py           # Temporal activity (download → extract → store)
+│   ├── Dockerfile                   # RAG service image
+│   └── Dockerfile.rag_worker        # Temporal worker image
+│
+├── routes/
+│   ├── supervisor_routes.py         # POST /api/supervisor/agent  (AG-UI)
+│   ├── documents_routes.py          # GET/DELETE /api/documents
+│   ├── knowledge_base_routes.py     # POST /api/knowledge-base/agent  (AG-UI)
+│   └── mcp_routes.py               # MCP tool discovery
+│
+├── ag_ui_middleware/
+│   ├── middleware.py                # AgUIMiddleware — run lifecycle, text streaming
+│   ├── events.py                    # EventFactory helpers (typed AG-UI events)
+│   ├── interrupt.py                 # InterruptManager — stores/resolves pending interrupts
+│   └── types.py                     # AgentResult, RunContext, InterruptData, ResumeData
+│
+├── Agent_UI/                        # Next.js frontend
+│   ├── src/services/api.js          # HttpAgent (@ag-ui/client) + S3 upload helpers
+│   ├── src/app/page.js              # Main chat page — streams AG-UI events
+│   ├── src/app/knowledge-base/      # Knowledge base search page
+│   ├── src/app/upload/              # Document upload page
+│   └── Dockerfile
+│
+├── main.py                          # Supervisor API FastAPI app
+├── settings.py                      # Global settings (pydantic-settings)
+├── logger.py
+├── requirements.txt
+├── docker-compose.yml
+├── dockerfile.api                   # Supervisor API image
+├── litellm_config.yaml              # LiteLLM model routing config
+├── .env.example
+└── README.md
 ```
 
-## 🔧 Advanced Configuration
+---
 
-### LLM Configuration Examples
+## LLM Provider Configuration
 
-The system supports multiple LLM providers through the `LLMFactory`:
+The `LLMFactory` in `framework_base/llm_base.py` supports:
 
 ```python
-# Ollama (Local)
-llm = LLMFactory.create_llm(
-    provider="ollama",
-    model_name="llama3:8b",
-    model_type="chat",
-    temperature=0.7,
-    base_url="http://localhost:11434"
-)
+from framework_base.llm_base import LLMFactory
 
-# OpenAI via LiteLLM
-llm = LLMFactory.create_llm(
-    provider="litellm",
-    model_name="gpt-4o-mini",
-    model_type="chat",
-    temperature=0.7
-)
+# Via LiteLLM proxy (default)
+llm = LLMFactory.create_llm(provider="litellm", model_name="gpt-4o-mini")
+
+# OpenAI directly
+llm = LLMFactory.create_llm(provider="openai", model_name="gpt-4o")
 
 # AWS Bedrock
-llm = LLMFactory.create_llm(
-    provider="bedrock",
-    model_name="anthropic.claude-3-sonnet-20240229-v1:0",
-    model_type="chat",
-    temperature=0.7
-)
+llm = LLMFactory.create_llm(provider="bedrock", model_name="us.amazon.nova-lite-v1:0")
+
+# Local Ollama
+llm = LLMFactory.create_llm(provider="ollama", model_name="llama3:8b",
+                             base_url="http://localhost:11434")
 ```
 
-### Vector Store Configuration
+LiteLLM model routing is defined in `litellm_config.yaml`. Default models: `gpt-4o`, `gpt-4o-mini`, `o1-preview`, `o1-mini` — all via GitHub Models.
 
-```python
-from framework_base.vector_store import get_vector_store
+---
 
-# ChromaDB (Default)
-vectorstore = get_vector_store(
-    store_type="chroma",
-    collection_name="langchain",
-    persist_directory="./chroma_db"
-)
-```
+## Document Store
 
-### Document Store Configuration
+`framework_base/doc_store.py` provides a `PostgresDocStore` keyed by document ID. Original document chunks are stored as JSONB and retrieved after a vector search returns matching summaries:
 
 ```python
 from framework_base.doc_store import get_document_store
 
-# MongoDB Document Store
-doc_store = get_document_store(
-    database="langchain_db",
-    collection_name="documents",
-    mongodb_uri="mongodb://127.0.0.1:27017"
-)
+store = get_document_store(collection_name="uploads")
+
+# Write chunks
+store.mset([("chunk-id-1", {"type": "text", "content": "...", "page": 1})])
+
+# Read back
+chunks = store.mget(["chunk-id-1"])
 ```
 
-## 🐳 Docker Services
+The DSN is sourced from `settings.postgres_dsn` (`POSTGRES_DSN` env var).
 
-The Docker Compose setup includes:
+---
 
-| Service | Port | Description |
-|---------|------|-------------|
-| supervisor-api | 8000 | FastAPI REST API service |
-| mcp-atlassian | 3000 | MCP server for Jira/Confluence |
-| mcp-gitlab | 3001 | MCP server for GitLab |
-| mongodb | 27017 | MongoDB document store |
-| mongo-express | 8081 | MongoDB admin interface |
+## Temporal Workflows
 
-## 🚨 Troubleshooting
+Document ingestion is orchestrated by Temporal to guarantee durability. If the worker crashes mid-way, Temporal replays the workflow from the last completed activity.
 
-See respective guides or .md files for troubleshooting tips specific to a service
+```
+Workflow:  IngestionWorkflow(bucket, object_key)
+Activities:
+  1. download_from_s3(bucket, object_key)        → local temp file
+  2. run_ingestion(file_path, object_key)         → extract + summarise + store
+Task queue: "rag-ingestion"
+```
 
-## 🤝 Contributing
+Monitor workflows in the Temporal UI at http://localhost:8080.
+
+---
+
+## Troubleshooting
+
+**rag-worker fails to connect to PostgreSQL**
+Make sure `POSTGRES_DSN` is set in `.env` and the `postgresql` service is healthy before the worker starts.
+
+**Temporal workflows stuck in "Running"**
+Check `docker compose logs rag-worker`. Common cause: missing S3 credentials or the LiteLLM proxy not yet ready.
+
+**ChromaDB connection refused**
+`CHROMA_SERVER_HOST` must be `chroma` (the Docker service name) when running inside Compose, not `localhost`.
+
+**MCP tools unavailable**
+Verify the corresponding `MCP_*_ENABLED` flag is `true` and the MCP container has passed its healthcheck (`docker compose ps`).
+
+---
+
+## Contributing
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Commit your changes
+4. Open a pull request
 
-## 📄 License
+## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT License — see the LICENSE file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgements
 
-- **LangChain** for the RAG framework and agent orchestration
-- **LangGraph** for state machine graph workflows
-- **Ollama** for local LLM deployment
-- **FastAPI** for the REST API framework
-- **ChromaDB** for vector storage
-- **MongoDB** for document persistence
-- **Model Context Protocol (MCP)** for extensible tool integration
-
-## 🔗 Related Resources
-
-- [LangChain Documentation](https://python.langchain.com/)
-- [LangGraph Documentation](https://langchain-ai.github.io/langgraph/)
-- [Ollama Models](https://ollama.ai/library)
-- [MCP Servers](https://github.com/modelcontextprotocol)
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
+- **LangChain / LangGraph** — agent orchestration and RAG tooling
+- **Temporal** — durable workflow engine
+- **FastAPI** — REST API framework
+- **ChromaDB** — vector database
+- **PostgreSQL + psycopg** — document chunk store
+- **LiteLLM** — unified LLM proxy
+- **AG-UI Protocol** — open event-based standard for agent-to-UI communication
+- **Model Context Protocol (MCP)** — extensible tool integration

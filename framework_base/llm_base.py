@@ -1,149 +1,81 @@
 from typing import Optional, Union
-from settings import settings
-from langchain_community.llms.ollama import Ollama
+
+from langchain_anthropic import ChatAnthropic
 from langchain_aws import ChatBedrockConverse
-from langchain_openai import ChatOpenAI
+from langchain_community.llms.ollama import Ollama
 from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
+
+try:
+    from langchain_openai import AzureChatOpenAI
+except Exception:
+    AzureChatOpenAI = None
+try:
+    from langchain_google_genai import ChatGoogleGenerativeAI
+except Exception:
+    ChatGoogleGenerativeAI = None
 from logger import setup_logger
+
+from framework_base.llm_providers.anthropic_provider import create_anthropic
+from framework_base.llm_providers.bedrock_provider import create_bedrock
+from framework_base.llm_providers.litellm_provider import create_litellm_chat
+from framework_base.llm_providers.ollama_provider import (
+    create_ollama,
+    create_ollama_chat,
+)
+from framework_base.llm_providers.openai_provider import create_openai
+from framework_base.llm_providers.openrouter_provider import create_openrouter
+from framework_base.llm_providers.azure_provider import create_azure
+from framework_base.llm_providers.gcp_provider import create_gcp
 
 logger = setup_logger()
 
+LLMInstance = Union[
+    Ollama,
+    ChatOllama,
+    ChatBedrockConverse,
+    ChatOpenAI,
+    ChatAnthropic,
+    (AzureChatOpenAI if AzureChatOpenAI is not None else object),
+    (ChatGoogleGenerativeAI if ChatGoogleGenerativeAI is not None else object),
+]
+
 
 class LLMFactory:
-    """Factory class to create different types of LLM instances"""
 
     @staticmethod
     def create_llm(
         provider: str,
         model_name: str,
-        model_type: str = "completion",  # "completion" or "chat"
+        model_type: str = "chat",
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
         **kwargs,
-    ) -> Union[Ollama, ChatOllama, ChatBedrockConverse, ChatOpenAI]:
+    ) -> LLMInstance:
         try:
-            if provider.lower() == "ollama":
+            p = provider.lower()
+
+            def _ollama_factory(name, temp, max_t, **kwargs):
                 if model_type.lower() == "chat":
-                    return LLMFactory._create_ollama_chat(
-                        model_name=model_name, temperature=temperature, **kwargs
-                    )
-                else:
-                    return LLMFactory._create_ollama(
-                        model_name=model_name, temperature=temperature, **kwargs
-                    )
+                    return create_ollama_chat(name, temp, **kwargs)
+                return create_ollama(name, temp, **kwargs)
 
-            elif provider.lower() == "bedrock":
-                return LLMFactory._create_bedrock(
-                    model_name=model_name,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    **kwargs,
-                )
-            elif provider.lower() == "litellm":
-                return LLMFactory._create_litellm_chat(
-                    model_name=model_name,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    **kwargs,
-                )
-            else:
+            providers_map = {
+                "ollama": _ollama_factory,
+                "bedrock": create_bedrock,
+                "litellm": create_litellm_chat,
+                "anthropic": create_anthropic,
+                "openai": create_openai,
+                "openrouter": create_openrouter,
+                "azure": create_azure,
+                "gcp": create_gcp,
+                "google": create_gcp,
+            }
+
+            factory = providers_map.get(p)
+            if not factory:
                 raise ValueError(f"Unsupported provider: {provider}")
-
+            return factory(model_name, temperature, max_tokens, **kwargs)
         except Exception as e:
-            print(f"Failed to initialize {provider} LLM: {e}")
-            raise e
-
-    @staticmethod
-    def _create_litellm_chat(
-        model_name: str,
-        temperature: float = 0.7,
-        max_tokens: Optional[int] = None,
-        **kwargs,
-    ) -> ChatOpenAI:
-        """
-        Create a ChatOpenAI instance routed through the LiteLLM proxy.
-
-        The LiteLLM proxy handles model routing, API key management,
-        and provider translation.  The model_name here corresponds
-        to a model_name entry in litellm_config.yaml.
-        """
-        proxy_url = settings.litellm_proxy_url
-        proxy_key = settings.litellm_master_key
-
-        if not proxy_url:
-            raise ValueError(
-                "LITELLM_PROXY_URL not set. Configure it in .env "
-                "or docker-compose.yml."
-            )
-
-        # Strip any provider prefix — LiteLLM uses its own
-        # model_name aliases defined in litellm_config.yaml
-        actual_model = model_name.replace("github/", "")
-
-        openai_kwargs: dict = {
-            "base_url": f"{proxy_url.rstrip('/')}/v1",
-            "api_key": proxy_key or "not-needed",
-        }
-
-        if max_tokens:
-            openai_kwargs["max_completion_tokens"] = max_tokens
-
-        logger.info(f"Using LiteLLM proxy model: {actual_model} " f"via {proxy_url}")
-        return ChatOpenAI(
-            model=actual_model,
-            temperature=temperature,
-            **openai_kwargs,
-        )
-
-    @staticmethod
-    def _create_ollama(
-        model_name: str,
-        temperature: float = 0.7,
-        base_url: str = "http://localhost:11434",
-        **kwargs,
-    ) -> Ollama:
-        """Create an Ollama completion instance"""
-        return Ollama(model=model_name, base_url=base_url, temperature=temperature)
-
-    @staticmethod
-    def _create_ollama_chat(
-        model_name: str,
-        temperature: float = 0.7,
-        base_url: str = "http://localhost:11434",
-        **kwargs,
-    ) -> ChatOllama:
-        """Create an Ollama chat instance"""
-        return ChatOllama(model=model_name, base_url=base_url, temperature=temperature)
-
-    @staticmethod
-    def _create_bedrock(
-        model_name: str,
-        temperature: float = 0.7,
-        max_tokens: Optional[int] = None,
-        **kwargs,
-    ) -> ChatBedrockConverse:
-        """Create a Bedrock instance using the Converse API (supports all models)"""
-        import boto3
-
-        region_name = kwargs.get("region_name") or settings.aws_region
-
-        session_kwargs = {}
-        if kwargs.get("profile_name"):
-            session_kwargs["profile_name"] = kwargs.get("profile_name")
-        if settings.aws_access_key_id:
-            session_kwargs["aws_access_key_id"] = settings.aws_access_key_id
-        if settings.aws_secret_access_key:
-            session_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
-
-        session = boto3.Session(**session_kwargs)
-        client = session.client(service_name="bedrock-runtime", region_name=region_name)
-
-        converse_kwargs: dict = {
-            "client": client,
-            "model": model_name,
-            "temperature": temperature,
-        }
-        if max_tokens:
-            converse_kwargs["max_tokens"] = max_tokens
-
-        return ChatBedrockConverse(**converse_kwargs)
+            logger.error(f"Failed to initialize {provider} LLM: {e}")
+            raise

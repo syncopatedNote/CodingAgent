@@ -20,7 +20,18 @@ class Settings(BaseSettings):
     gitlab_project_id: str = Field(default="", alias="GITLAB_PROJECT_ID")
     development_rules_path: str = Field(default="", alias="DEVELOPMENT_RULES_PATH")
     development_rules_branch: str = Field(default="", alias="DEVELOPMENT_RULES_BRANCH")
+    # LLM providers info
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
+    anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
+    openrouter_api_key: str = Field(default="", alias="OPENROUTER_API_KEY")
+    # Azure OpenAI Configuration
+    azure_openai_api_key: str = Field(default="", alias="AZURE_OPENAI_API_KEY")
+    azure_openai_endpoint: str = Field(default="", alias="AZURE_OPENAI_ENDPOINT")
+    azure_openai_deployment: str = Field(default="", alias="AZURE_OPENAI_DEPLOYMENT")
+    azure_openai_api_version: str = Field(default="", alias="AZURE_OPENAI_API_VERSION")
+    # Google / GCP Configuration
+    google_api_key: str = Field(default="", alias="GOOGLE_API_KEY")
+    gcp_project: str = Field(default="", alias="GCP_PROJECT")
     github_token: str = Field(default="", alias="GITHUB_TOKEN")
 
     # LLM Configuration
@@ -43,6 +54,9 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field(
         default="http://localhost:11434", alias="OLLAMA_BASE_URL"
     )
+
+    # PostgreSQL docstore
+    postgres_dsn: str = Field(alias="POSTGRES_DSN")
 
     # Chroma (vector DB) Configuration (hosted service only)
     chroma_server_host: str = Field(default="", alias="CHROMA_SERVER_HOST")
