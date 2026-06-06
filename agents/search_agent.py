@@ -339,8 +339,9 @@ class SearchAgent:
 
                 Provide your response now:"""
 
-            # Get formatted response from LLM
-            messages = state["messages"] + [HumanMessage(content=format_prompt)]
+            # Get formatted response from LLM using a clean message list —
+            # avoids sending toolUse/toolResult blocks to Bedrock without toolConfig
+            messages = [HumanMessage(content=format_prompt)]
             response = await self.llm.ainvoke(messages)
 
             state["final_response"] = response.content

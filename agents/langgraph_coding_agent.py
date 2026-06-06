@@ -26,11 +26,13 @@ The graph is compiled with a ``MemorySaver`` checkpointer so that
 multiple HTTP requests.
 """
 
+import asyncio
 import json
 import uuid
 from typing import Any, Dict, Optional, TypedDict, Annotated
 
 from langchain_core.messages import (
+    AIMessage,
     BaseMessage,
     HumanMessage,
     SystemMessage,
@@ -254,8 +256,16 @@ Follow this flow.  Skip any step whose answer the user has already provided.
 ### Phase 2 — Context Gathering  (use GitHub / Confluence MCP tools)
 
 5. If the user provided a Confluence link, fetch the page content.
-6. If the user pointed to a guidelines file in a repo, fetch it.
-7. Explore the repository structure and read relevant source files to
+6. If the user references a GitHub issue by description (e.g. "the open issue",
+   "the bug about login") rather than by an explicit number:
+   - **ALWAYS call a listing/search tool first** (e.g. `issues_list` or
+     `search_issues`) to retrieve the matching issue number.
+   - **NEVER guess or assume an issue number** — do not default to 1 or any
+     other value.
+   - After reading the issue, call `ask_user` to confirm it is the right one
+     before proceeding.
+7. If the user pointed to a guidelines file in a repo, fetch it.
+8. Explore the repository structure and read relevant source files to
    understand conventions, tech stack, and existing patterns.
    - If the user mentioned specific files or an implementation strategy,
      start there.
@@ -263,16 +273,16 @@ Follow this flow.  Skip any step whose answer the user has already provided.
 
 ### Phase 3 — Code Generation & Reflection  (3 cycles)
 
-8.  Call `generate_code` with all gathered context.
-9.  Call `review_code` on the generated code.
-10. Call `generate_code` again with the review feedback.
+9.  Call `generate_code` with all gathered context.
+10.  Call `review_code` on the generated code.
+11. Call `generate_code` again with the review feedback.
     Repeat steps 9-10 so you complete **exactly 3 review → improve cycles**.
 
 ### Phase 4 — Push & Report  (use GitHub MCP tools)
 
-11. Create a new feature branch from the target branch.
-12. Push (create / update) the final code files to the new branch.
-13. Respond with a **final summary** including the new branch name.
+12. Create a new feature branch from the target branch.
+13. Push (create / update) the final code files to the new branch.
+14. Respond with a **final summary** including the new branch name.
     Do NOT make any tool calls in this final message.
 
 ## Rules
@@ -280,6 +290,8 @@ Follow this flow.  Skip any step whose answer the user has already provided.
 - Be conversational and helpful when asking questions.
 - Do NOT re-ask for information the user already provided.
 - Always call `ask_user` ALONE — never combine it with other tools.
+- **NEVER assume or guess a GitHub issue number.** If the user has not given
+  an explicit number, list or search issues first to discover it.
 - Always complete exactly 3 reflection cycles before pushing.
 - When finished, reply with a clear summary and the branch name.
   Make NO tool calls in your final message.
@@ -524,6 +536,55 @@ class LangGraphCodingAgent:
 
     # ── Graph nodes ────────────────────────────────────────
 
+    @staticmethod
+    def _prune_messages(messages: list, max_cycles: int = 15) -> list:
+        """
+        Limit accumulated tool-call/result cycles to ``max_cycles`` to
+        prevent context explosion that causes smaller modes like Nova Lite
+        to produce malformed tool-use output.
+
+        Pruning respects Bedrock's constraint that every toolUse block
+        in an AIMessage must have a matching toolResult immediately after
+        it — so we drop complete (AIMessage + ToolMessages) groups as a
+        unit rather than cutting at an arbitrary index.
+        """
+        if not messages:
+            return messages
+
+        # Always keep the first message (the user's original task)
+        anchor = messages[:1]
+        rest = messages[1:]
+
+        # Group rest into tool-call cycles and plain messages
+        groups: list[list] = []
+        i = 0
+        while i < len(rest):
+            msg = rest[i]
+            if getattr(msg, "tool_calls", None):
+                # AIMessage with tool calls — collect it + its ToolMessages
+                group = [msg]
+                i += 1
+                while i < len(rest) and isinstance(rest[i], ToolMessage):
+                    group.append(rest[i])
+                    i += 1
+                groups.append(group)
+            else:
+                groups.append([msg])
+                i += 1
+
+        if len(groups) > max_cycles:
+            groups = groups[-max_cycles:]
+
+        return anchor + [m for g in groups for m in g]
+
+    # Errors Bedrock raises when the model itself misbehaves; safe to retry
+    _RETRYABLE_ERROR_SUBSTRINGS = (
+        "ModelErrorException",
+        "ModelTimeoutException",
+        "ThrottlingException",
+        "ServiceUnavailableException",
+    )
+
     async def _supervisor_node(self, state: CodingTaskState) -> dict:
         """The hub: assess state and pick the next tool call."""
         if self._tools is None:
@@ -544,29 +605,47 @@ class LangGraphCodingAgent:
                 "directly (paste content, describe structure, etc)."
             )
 
-        messages = [SystemMessage(content=system_prompt)] + state["messages"]
+        pruned = self._prune_messages(state["messages"])
+        messages = [SystemMessage(content=system_prompt)] + pruned
 
-        try:
-            response = await llm_with_tools.ainvoke(messages)
-            return {"messages": [response]}
-        except Exception as exc:
-            logger.error(f"Supervisor LLM call failed: {exc}", exc_info=True)
-            from langchain_core.messages import AIMessage
-
-            return {
-                "messages": [
-                    AIMessage(
-                        content=(
-                            "I'm having trouble connecting to the AI service "
-                            "right now. This may be a temporary issue.\n\n"
-                            f"**Error:** {exc}\n\n"
-                            "Please try again in a moment. If the issue "
-                            "persists, check that the LLM service is "
-                            "configured and running."
-                        )
+        max_retries = 3
+        last_exc: Exception | None = None
+        for attempt in range(max_retries):
+            try:
+                response = await llm_with_tools.ainvoke(messages)
+                return {"messages": [response]}
+            except Exception as exc:
+                exc_repr = repr(exc)
+                is_retryable = any(
+                    s in exc_repr for s in self._RETRYABLE_ERROR_SUBSTRINGS
+                )
+                if is_retryable and attempt < max_retries - 1:
+                    delay = 2**attempt  # 1s, 2s
+                    logger.warning(
+                        f"Transient model error (attempt {attempt + 1}/"
+                        f"{max_retries}), retrying in {delay}s: {exc}"
                     )
-                ]
-            }
+                    await asyncio.sleep(delay)
+                    last_exc = exc
+                    continue
+                last_exc = exc
+                break
+
+        logger.error(f"Supervisor LLM call failed: {last_exc}", exc_info=True)
+        return {
+            "messages": [
+                AIMessage(
+                    content=(
+                        "I'm having trouble connecting to the AI service "
+                        "right now. This may be a temporary issue.\n\n"
+                        f"**Error:** {last_exc}\n\n"
+                        "Please try again in a moment. If the issue "
+                        "persists, check that the LLM service is "
+                        "configured and running."
+                    )
+                )
+            ]
+        }
 
     async def _tool_executor_node(self, state: CodingTaskState) -> dict:
         """The spoke: execute every tool call from the supervisor."""
