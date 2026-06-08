@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     llm_model_name: str = Field(default="gpt-4o-mini", alias="LLM_MODEL_NAME")
     llm_model_type: str = Field(default="chat", alias="LLM_MODEL_TYPE")
 
+    # Reranker Configuration
+    reranker_provider: str = Field(default="flashrank", alias="RERANKER_PROVIDER")
+    reranker_top_n: int = Field(default=5, alias="RERANKER_TOP_N")
+
     # AWS Configuration
     aws_access_key_id: str = Field(default="", alias="AWS_ACCESS_KEY_ID")
     aws_secret_access_key: str = Field(default="", alias="AWS_SECRET_ACCESS_KEY")

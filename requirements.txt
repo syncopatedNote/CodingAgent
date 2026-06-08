@@ -255,6 +255,7 @@ zipp==3.21.0
 zstandard==0.23.0
 langchain-openai
 langchain-google-genai
+flashrank
 boto3==1.42.9
 temporalio>=1.7.0
 psycopg[binary]>=3.1

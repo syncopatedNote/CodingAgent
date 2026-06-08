@@ -7,12 +7,14 @@ knowledge base (RAG) and grounding the LLM response in those documents.
 
 from typing import Iterator, List, Optional, Sequence
 
+from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.multi_vector import MultiVectorRetriever
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
 from langchain_core.stores import BaseStore
 from framework_base.doc_store import PostgresDocStore, get_document_store
 from framework_base.llm_base import LLMFactory
+from framework_base.reranker import RerankerFactory
 from framework_base.vector_store import get_vector_store
 from settings import settings
 from logger import setup_logger
@@ -23,14 +25,18 @@ logger = setup_logger(__name__)
 _RAG_COLLECTION = "uploads"
 _ID_KEY = "doc_id"
 
+# Fetch more candidates than needed so the reranker has headroom after
+# MultiVectorRetriever deduplicates multiple vectors per source chunk.
+_VECTOR_FETCH_K = 20
+
 
 class _DocStoreAdapter(BaseStore[str, Document]):
-    """Adapts PostgresDocStore (stores plain dicts) to BaseStore[str, Document].
+    """Adapts PostgresDocStore (plain dicts) to BaseStore[str, Document].
 
-    MultiVectorRetriever requires BaseStore[str, Document]. The ingest pipeline
-    stores raw dicts so that table HTML and page numbers survive JSON round-trips.
-    This adapter converts those dicts to Document objects on retrieval, placing
-    type and page metadata in Document.metadata for use in context formatting.
+    MultiVectorRetriever requires BaseStore[str, Document]. The ingest
+    pipeline stores raw dicts so that table HTML and page numbers survive
+    JSON round-trips. This adapter converts those dicts to Document objects
+    on retrieval, placing type and page metadata in Document.metadata.
     """
 
     def __init__(self, inner: PostgresDocStore) -> None:
@@ -67,7 +73,8 @@ class KnowledgeBaseSearchAgent:
         """Initialize the knowledge base search agent with an LLM."""
         llm_kwargs = {"temperature": 0.3}
 
-        if settings.llm_provider.lower() == "ollama" and settings.ollama_base_url:
+        is_ollama = settings.llm_provider.lower() == "ollama"
+        if is_ollama and settings.ollama_base_url:
             llm_kwargs["base_url"] = settings.ollama_base_url
 
         self.llm = LLMFactory.create_llm(
@@ -78,22 +85,32 @@ class KnowledgeBaseSearchAgent:
         )
 
     async def _retrieve_rag_context(self, query: str) -> str:
-        """Query the knowledge base via MultiVectorRetriever and return
-        formatted original document snippets, or an empty string if nothing
-        is found or the store is unavailable.
+        """Retrieve and rerank relevant chunks from the knowledge base.
 
-        The vector store holds LLM-generated summaries; the docstore holds
-        the original chunks. MultiVectorRetriever does the two-step lookup
-        so the LLM receives full source content, not summaries.
+        Pipeline:
+          1. MultiVectorRetriever fetches _VECTOR_FETCH_K vector candidates
+             from ChromaDB (summaries / HyDE questions / search queries),
+             deduplicates by doc_id, and returns the original source chunks
+             from PostgreSQL.
+          2. ContextualCompressionRetriever passes those candidates to the
+             configured reranker, which scores each (query, chunk) pair and
+             returns the top_n most relevant chunks.
+
+        Returns a formatted context string, or an empty string when nothing
+        is found or the store is unavailable.
         """
         try:
             vectorstore = get_vector_store(collection_name=_RAG_COLLECTION)
             docstore = _DocStoreAdapter(get_document_store())
-            retriever = MultiVectorRetriever(
+            base_retriever = MultiVectorRetriever(
                 vectorstore=vectorstore,
                 docstore=docstore,
                 id_key=_ID_KEY,
-                search_kwargs={"k": 5},
+                search_kwargs={"k": _VECTOR_FETCH_K},
+            )
+            retriever = ContextualCompressionRetriever(
+                base_compressor=RerankerFactory.create_reranker(),
+                base_retriever=base_retriever,
             )
             docs = await retriever.ainvoke(query)
             if docs:
@@ -108,7 +125,10 @@ class KnowledgeBaseSearchAgent:
                         )
                     context_parts.append(f"{label}:\n{doc.page_content}")
                 rag_context = "\n\n".join(context_parts)
-                logger.info(f"Retrieved {len(docs)} document(s) from knowledge base")
+                logger.info(
+                    f"Retrieved {len(docs)} document(s) from knowledge base"
+                    " after reranking"
+                )
                 return rag_context
         except Exception as rag_err:
             logger.warning(
@@ -122,25 +142,29 @@ class KnowledgeBaseSearchAgent:
         if rag_context:
             return (
                 "You are a helpful AI assistant. Use the relevant documents\n"
-                "retrieved from the knowledge base below to answer the user's question.\n"
-                "If the retrieved documents do not contain enough information, supplement\n"
-                "with your general knowledge and say so.\n\n"
+                "retrieved from the knowledge base below to answer the "
+                "user's question.\n"
+                "If the retrieved documents do not contain enough information,"
+                " supplement\nwith your general knowledge and say so.\n\n"
                 f"**Relevant context from knowledge base:**\n{rag_context}\n\n"
                 f"**User question:** {query}\n\n"
-                "Provide a clear, accurate answer grounded in the context above.\n"
+                "Provide a clear, accurate answer grounded in the context"
+                " above.\n"
                 "Cite which document(s) support your answer where applicable."
             )
         return (
-            "You are a helpful AI assistant with access to a knowledge base.\n"
-            "No relevant documents were found in the knowledge base for this query.\n\n"
+            "You are a helpful AI assistant with access to a knowledge"
+            " base.\n"
+            "No relevant documents were found in the knowledge base for"
+            " this query.\n\n"
             f"**User question:** {query}\n\n"
-            "Answer using your general knowledge and clearly state that no matching\n"
+            "Answer using your general knowledge and clearly state that"
+            " no matching\n"
             "documents were found in the knowledge base."
         )
 
     async def search(self, query: str) -> str:
-        """
-        Search the knowledge base and return a grounded answer.
+        """Search the knowledge base and return a grounded answer.
 
         Args:
             query: The user's question or search query.
