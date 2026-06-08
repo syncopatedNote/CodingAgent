@@ -6,10 +6,16 @@ import pymupdf
 from tqdm import tqdm
 import base64
 from IPython.display import Image, display
-
-# from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 logger = setup_logger(__name__)
+
+_TEXT_SPLITTER = RecursiveCharacterTextSplitter(
+    chunk_size=1500,
+    chunk_overlap=300,
+    separators=["\n\n", "\n", ". ", " ", ""],
+    length_function=len,
+)
 
 
 def extract_tables_from_pdf(
@@ -89,32 +95,6 @@ def display_base64_image(base64_code):
     display(Image(data=image_data))
 
 
-# def process_text_chunks(text, text_splitter, page_num, items):
-#     chunks = text_splitter.split_text(text)
-#     for _, chunk in enumerate(chunks):
-#         items.append({"page": page_num, "type": "text", "text": chunk})
-
-
-# def extract_text_from_pdf(
-#         filepath: str = None,
-#         pages: Optional[str] = 'all'
-# ) -> list:
-#     doc = pymupdf.open(filepath)
-#     num_pages = len(doc)
-#     text_splitter = RecursiveCharacterTextSplitter(
-#         chunk_size=700, chunk_overlap=200, length_function=len
-#     )
-#     extracted_text_chunks = []
-#     for page_num in tqdm(range(num_pages), desc="Processing PDF pages"):
-#         page = doc[page_num]
-#         text = page.get_text()
-#         chunks = text_splitter.split_text(text)
-#         for _, chunk in enumerate(chunks):
-#             extracted_text_chunks.append({"page": page_num, "type": "text", "text": chunk})
-
-#     return extracted_text_chunks
-
-
 def extract_text_from_pdf(filepath: str = None, pages: Optional[str] = "all") -> list:
     """Extract text from each PDF page, including form field values.
 
@@ -169,6 +149,9 @@ def extract_text_from_pdf(filepath: str = None, pages: Optional[str] = "all") ->
         if cur_parts:
             lines.append(" ".join(cur_parts))
 
-        result.append({"page": page_num, "type": "text", "text": "\n".join(lines)})
+        page_text = "\n".join(lines)
+        if page_text.strip():
+            for chunk in _TEXT_SPLITTER.split_text(page_text):
+                result.append({"page": page_num, "type": "text", "text": chunk})
 
     return result
