@@ -21,6 +21,8 @@ from framework_base.llm_base import LLMFactory
 from framework_base.multi_server_mcp_client import get_read_only_tools
 from framework_base.mcp_servers.registry import get_mcp_registry
 from agents.components.search_classifier import classify_search_query, SearchCategory
+from agents.prompts.search.tool_calling import SEARCH_TOOL_CALLING_PROMPT
+from agents.prompts.search.format_results import SEARCH_FORMAT_RESULTS_PROMPT
 from settings import settings
 from logger import setup_logger
 
@@ -171,21 +173,11 @@ class SearchAgent:
 
             # Build the prompt for the LLM
             tool_names = [t.name for t in tools]
-            search_prompt = f"""
-                You are a search assistant with access to read-only tools
-                for {server_name}.
-                User Query: {state['query']}
-
-                Your task:
-                1. Analyze what the user is looking for
-                2. Use the appropriate tools to find the information
-                3. You can call multiple tools if needed
-
-                Available tools: {', '.join(tool_names)}
-
-                Think about what the user needs and call the
-                appropriate tool(s).
-            """
+            search_prompt = SEARCH_TOOL_CALLING_PROMPT.format(
+                server_name=server_name,
+                query=state["query"],
+                tool_names=", ".join(tool_names),
+            )
 
             messages = [HumanMessage(content=search_prompt)]
 
@@ -319,25 +311,10 @@ class SearchAgent:
                         result_str = result_str[:2000] + "... (truncated)"
                     results_summary.append(f"- {tool_name}: {result_str}")
 
-            format_prompt = f"""
-                Based on the search results below, provide a clear, helpful
-                response to the user's question.
-
-                Original Query: {state['query']}
-
-                Search Results:
-                {chr(10).join(results_summary)}
-
-                Instructions:
-                1. Summarize the key findings in a natural, conversational way
-                2. If searching Jira tickets, include: ticket ID, summary,
-                   status, and key details.
-                3. If searching Confluence, include: page titles, relevant
-                   excerpts, and links if available.
-                4. If no useful results, say so clearly
-                5. Format nicely with markdown (headers, bullet points, etc.)
-
-                Provide your response now:"""
+            format_prompt = SEARCH_FORMAT_RESULTS_PROMPT.format(
+                query=state["query"],
+                results_summary="\n".join(results_summary),
+            )
 
             # Get formatted response from LLM using a clean message list —
             # avoids sending toolUse/toolResult blocks to Bedrock without toolConfig

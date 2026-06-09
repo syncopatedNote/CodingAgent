@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from framework_base.llm_base import LLMFactory
 from settings import settings
 from logger import setup_logger
+from agents.prompts.search.classify import SEARCH_CLASSIFY_PROMPT
 
 logger = setup_logger(__name__)
 
@@ -133,33 +134,6 @@ class _ClassifyOutput(BaseModel):
     )
 
 
-_CLASSIFY_PROMPT = """\
-You are a search-routing assistant.  Classify the following search query into
-exactly one category based on WHERE the information is most likely stored.
-
-Categories:
-  atlassian  — Confluence pages, Jira issues, epics, sprints, design docs
-               stored in Atlassian products
-  github     — GitHub repositories, pull requests, GitHub issues, commits,
-               branches, GitHub Actions workflows
-  gitlab     — GitLab repositories, merge requests, GitLab CI pipelines
-  context7   — Library documentation, framework docs, package API references,
-               technical how-to guides for open-source software
-  unknown    — Cannot be determined from the query alone
-
-Query: {query}
-
-Respond with a JSON object matching this schema:
-{format_instructions}
-
-Important:
-- Choose "unknown" only if the query is genuinely ambiguous across multiple
-  categories, or refers to no specific system at all.
-- Do NOT infer "github" just because code is mentioned; only use it when
-  the query clearly targets a GitHub resource.
-"""
-
-
 async def _llm_classify(query: str) -> SearchCategory:
     """Call the LLM to classify the query. Falls back to UNKNOWN on error."""
     try:
@@ -170,7 +144,7 @@ async def _llm_classify(query: str) -> SearchCategory:
             model_type=settings.llm_model_type,
             temperature=0,
         )
-        prompt = _CLASSIFY_PROMPT.format(
+        prompt = SEARCH_CLASSIFY_PROMPT.format(
             query=query,
             format_instructions=parser.get_format_instructions(),
         )

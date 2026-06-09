@@ -18,49 +18,47 @@ _TEXT_SPLITTER = RecursiveCharacterTextSplitter(
 )
 
 
+def split_text(text: str) -> list[str]:
+    """Split text into chunks using the shared text splitter configuration."""
+    return _TEXT_SPLITTER.split_text(text)
+
+
 def extract_tables_from_pdf(
     file_path: str,
-    pages: Optional[str] = "all",
-    output_format: str = None,
     guess: bool = True,
     lattice: bool = True,
     stream: bool = True,
-) -> pd.DataFrame:
+) -> list[dict]:
+    """Extract tables from a PDF, returning each table with its 0-indexed page number.
+
+    Returns a list of dicts: {"page": int, "table": pd.DataFrame}
+    Page numbers are 0-indexed to match the convention used by extract_text_from_pdf.
     """
-    Extract tables from the PDF file.
+    doc = pymupdf.open(file_path)
+    num_pages = len(doc)
+    result = []
 
-    Args:
-        pages (str, optional): Pages to extract tables from. Defaults to 'all'.
-                                Can be 'all' or a specific page number like '1' or
-                                a range like '1-3'.
-        guess (bool): Whether to guess the table structure. Defaults to True.
-        lattice (bool): Whether to use lattice mode for table extraction.
-                        Defaults to True.
-        stream (bool): Whether to use stream mode for table extraction.
-                        Defaults to True.
+    logger.info(f"Extracting tables from PDF: {file_path} ({num_pages} pages)")
 
-    Returns:
-        List[pd.DataFrame]: List of extracted tables as pandas DataFrames
-    """
-    try:
-        logger.info(f"Extracting tables from PDF: {file_path}")
+    for page_num in range(1, num_pages + 1):  # tabula uses 1-indexed pages
+        try:
+            page_tables = tabula.read_pdf(
+                file_path,
+                pages=str(page_num),
+                guess=guess,
+                lattice=lattice,
+                stream=stream,
+                multiple_tables=True,
+            )
+            for table in page_tables:
+                if not table.empty:
+                    result.append({"page": page_num - 1, "table": table})
+        except Exception as e:
+            logger.warning(f"Table extraction failed on page {page_num}: {e}")
+            continue
 
-        tables = tabula.read_pdf(
-            file_path,
-            pages=pages,
-            guess=guess,
-            output_format=output_format,
-            lattice=lattice,
-            stream=stream,
-            multiple_tables=True,
-        )
-
-        logger.info(f"Successfully extracted {len(tables)} tables")
-        return tables
-
-    except Exception as e:
-        logger.error(f"Error extracting tables from PDF: {str(e)}")
-        raise
+    logger.info(f"Successfully extracted {len(result)} tables")
+    return result
 
 
 def extract_images_from_pdf(filepath: str = None) -> list:

@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage
 from framework_base.llm_base import LLMFactory
 from settings import settings
 from logger import setup_logger
+from agents.prompts.general_chat.system import GENERAL_CHAT_SYSTEM_PROMPT
 
 logger = setup_logger(__name__)
 
@@ -18,7 +19,8 @@ class GeneralChatAgent:
         """Initialize the general chat agent with an LLM."""
         llm_kwargs = {"temperature": 0.3}
 
-        if settings.llm_provider.lower() == "ollama" and settings.ollama_base_url:
+        is_ollama = settings.llm_provider.lower() == "ollama"
+        if is_ollama and settings.ollama_base_url:
             llm_kwargs["base_url"] = settings.ollama_base_url
 
         self.llm = LLMFactory.create_llm(
@@ -29,12 +31,7 @@ class GeneralChatAgent:
         )
 
     def _build_prompt(self, query: str) -> str:
-        return (
-            "You are a helpful AI assistant. Answer the user's question\n"
-            "clearly and concisely. Use Markdown formatting where helpful\n"
-            "(lists, code fences, bold headings). Do not invent facts.\n\n"
-            f"User question: {query}"
-        )
+        return GENERAL_CHAT_SYSTEM_PROMPT.format(query=query)
 
     async def chat(self, query: str) -> str:
         """
