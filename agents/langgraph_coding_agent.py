@@ -50,6 +50,13 @@ from framework_base.llm_base import LLMFactory
 from framework_base.multi_server_mcp_client import multi_server_mcp_client
 from logger import setup_logger
 from settings import settings
+from agents.prompts.coding_supervisor.system import (
+    CODING_SUPERVISOR_SYSTEM_PROMPT,
+    CODING_SUPERVISOR_DEGRADED_SUFFIX,
+)
+from agents.prompts.coding_supervisor.nudge import CODING_SUPERVISOR_NUDGE_PROMPT
+from agents.prompts.coding_supervisor.generate_code import GENERATE_CODE_PROMPT
+from agents.prompts.coding_supervisor.review_code import REVIEW_CODE_PROMPT
 
 logger = setup_logger(__name__)
 
@@ -122,34 +129,16 @@ async def generate_code(
         )
     extra = "\n\n".join(extra_sections)
 
-    prompt = f"""\
-You are an expert software developer.  {action} production-ready code.
-
-REQUIREMENTS:
-{requirements}
-
-CODEBASE CONTEXT:
-{context}
-
-DEVELOPMENT GUIDELINES:
-{guidelines}
-
-{extra}
-
-Provide complete, production-ready code that:
-1. Follows the development guidelines strictly
-2. Implements all requirements
-3. Includes proper error handling, logging, and documentation
-4. Follows best practices for the target technology stack
-{"5. Addresses every review-feedback point" if feedback else ""}
-
-Structure your response as file-by-file code blocks with clear paths, e.g.
-
-### `src/utils/helper.py`
-```python
-...
-```
-"""
+    prompt = GENERATE_CODE_PROMPT.format(
+        action=action,
+        requirements=requirements,
+        context=context,
+        guidelines=guidelines,
+        extra=extra,
+        feedback_instruction=(
+            "5. Addresses every review-feedback point" if feedback else ""
+        ),
+    )
     try:
         response = await llm.ainvoke([HumanMessage(content=prompt)])
         return str(response.content)
@@ -177,30 +166,11 @@ async def review_code(
     """
     llm = _create_code_llm()
 
-    prompt = f"""\
-You are a senior code reviewer. Provide specific, actionable feedback.
-
-CODE TO REVIEW:
-{code}
-
-REQUIREMENTS:
-{requirements}
-
-DEVELOPMENT GUIDELINES:
-{guidelines}
-
-Review for:
-1. Requirements compliance — does it implement everything asked?
-2. Guidelines adherence — does it follow the coding standards?
-3. Code quality — naming, structure, DRY, SOLID principles
-4. Error handling — edge cases, input validation, graceful failures
-5. Security — injection risks, auth issues, data exposure
-6. Performance — algorithmic efficiency, unnecessary allocations
-7. Maintainability — readability, documentation, testability
-
-Return a numbered list of concrete improvements.  Reference exact
-locations and suggest fixes.
-"""
+    prompt = REVIEW_CODE_PROMPT.format(
+        code=code,
+        requirements=requirements,
+        guidelines=guidelines,
+    )
     try:
         response = await llm.ainvoke([HumanMessage(content=prompt)])
         return str(response.content)
@@ -224,86 +194,6 @@ def _create_code_llm():
         model_type=settings.llm_model_type,
         **kwargs,
     )
-
-
-# ── Supervisor System Prompt ──────────────────────────────────────
-
-
-SUPERVISOR_SYSTEM_PROMPT = """\
-You are an expert coding agent that helps users implement code in GitHub \
-repositories.  You orchestrate a multi-step workflow by calling the right \
-tools at the right time.
-
-## Your Workflow
-
-Follow this flow.  Skip any step whose answer the user has already provided.
-
-### Phase 1 — Information Gathering  (use `ask_user`)
-
-1. **Requirements** — Ask what the user wants to implement.  They may give:
-   - A Confluence page link  (you will fetch it with Confluence tools later)
-   - A design-specification summary pasted inline
-   - A brief natural-language description
-2. **Development guidelines** — Ask if they have coding guidelines:
-   - A path to a file in a GitHub repo + branch  (you will fetch it)
-   - Guidelines pasted directly
-   - "none" → use general best practices
-3. **Implementation strategy** (optional) — Ask if they have a preferred
-   approach, specific files to modify, or architectural preferences.
-4. **Target branch** — Ask which branch to base the work on.
-   Default to `main` or `master` if unspecified.
-
-### Phase 2 — Context Gathering  (use GitHub / Confluence MCP tools)
-
-5. If the user provided a Confluence link, fetch the page content.
-6. If the user references a GitHub issue by description (e.g. "the open issue",
-   "the bug about login") rather than by an explicit number:
-   - **ALWAYS call a listing/search tool first** (e.g. `issues_list` or
-     `search_issues`) to retrieve the matching issue number.
-   - **NEVER guess or assume an issue number** — do not default to 1 or any
-     other value.
-   - After reading the issue, call `ask_user` to confirm it is the right one
-     before proceeding.
-7. If the user pointed to a guidelines file in a repo, fetch it.
-8. Explore the repository structure and read relevant source files to
-   understand conventions, tech stack, and existing patterns.
-   - If the user mentioned specific files or an implementation strategy,
-     start there.
-   - Otherwise, read the top-level tree and a few key files.
-
-### Phase 3 — Code Generation & Reflection  (3 cycles)
-
-9.  Call `generate_code` with all gathered context.
-10.  Call `review_code` on the generated code.
-11. Call `generate_code` again with the review feedback.
-    Repeat steps 9-10 so you complete **exactly 3 review → improve cycles**.
-
-### Phase 4 — Push & Report  (use GitHub MCP tools)
-
-12. Create a new feature branch from the target branch.
-13. Push (create / update) the final code files to the new branch.
-14. Respond with a **final summary** including the new branch name.
-    Do NOT make any tool calls in this final message.
-
-## Rules
-
-- Be conversational and helpful when asking questions.
-- Do NOT re-ask for information the user already provided.
-- Always call `ask_user` ALONE — never combine it with other tools.
-- **NEVER assume or guess a GitHub issue number.** If the user has not given
-  an explicit number, list or search issues first to discover it.
-- Always complete exactly 3 reflection cycles before pushing.
-- When finished, reply with a clear summary and the branch name.
-  Make NO tool calls in your final message.
-- To interact with GitHub, Confluence, or other external services,
-  use the `run_mcp_tool` tool with the exact tool name and a JSON
-  arguments string.
-- **NEVER send a text-only message in the middle of the workflow.**
-  Every response MUST contain at least one tool call UNLESS it is
-  your final summary (Phase 4, step 13).  If you just fetched
-  information and need to process it, immediately call the next
-  tool — do NOT narrate what you plan to do next.
-"""
 
 
 # ── Agent ──────────────────────────────────────────────────────────
@@ -593,16 +483,10 @@ class LangGraphCodingAgent:
         llm_with_tools = self.llm.bind_tools(self._tools)
 
         # Build system prompt, appending MCP status if degraded
-        system_prompt = SUPERVISOR_SYSTEM_PROMPT
+        system_prompt = CODING_SUPERVISOR_SYSTEM_PROMPT
         if getattr(self, "_mcp_load_error", None):
-            system_prompt += (
-                "\n\n## ⚠️ Degraded Mode\n"
-                f"{self._mcp_load_error}\n"
-                "You can still ask the user questions and generate/"
-                "review code, but you CANNOT access GitHub, "
-                "Confluence, or Jira. Inform the user of this "
-                "limitation and ask them to provide information "
-                "directly (paste content, describe structure, etc)."
+            system_prompt += CODING_SUPERVISOR_DEGRADED_SUFFIX.format(
+                mcp_load_error=self._mcp_load_error
             )
 
         pruned = self._prune_messages(state["messages"])
@@ -769,19 +653,7 @@ class LangGraphCodingAgent:
         """Re-prompt the supervisor when it narrated its plan
         instead of making tool calls."""
         logger.warning("Supervisor narrated instead of acting — nudging")
-        return {
-            "messages": [
-                SystemMessage(
-                    content=(
-                        "You just described what you plan to do "
-                        "instead of doing it. Do NOT narrate — "
-                        "call the appropriate tool NOW. Every "
-                        "response must contain a tool call unless "
-                        "it is your final summary."
-                    )
-                )
-            ]
-        }
+        return {"messages": [SystemMessage(content=CODING_SUPERVISOR_NUDGE_PROMPT)]}
 
     # ── Graph construction ─────────────────────────────────
 

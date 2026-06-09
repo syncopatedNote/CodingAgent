@@ -3,6 +3,9 @@ from langgraph.graph.state import StateGraph, END
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from framework_base.llm_base import LLMFactory
 from settings import settings
+from agents.prompts.question_enhancer.enhance_question import (
+    QUESTION_ENHANCEMENT_PROMPT,
+)
 
 # Initialize LLM using settings
 llm_kwargs = {"temperature": 0.5}
@@ -84,36 +87,10 @@ def enhance_node(state: AgentState) -> AgentState:
         [f"{msg.__class__.__name__}: {msg.content}" for msg in recent_context]
     )
 
-    enhancement_prompt = f"""Your task is to rephrase a question to add useful \
-context from the immediately preceding conversation exchange — but ONLY when the \
-current question is a genuine follow-up to that exchange.
-
-Rules (follow strictly):
-1. If the current question targets a DIFFERENT system, service, or topic than the \
-previous exchange, return it UNCHANGED.
-2. If the current question is already self-contained and specific, return it UNCHANGED.
-3. Only add context when the current question is a direct follow-up (e.g. "what about \
-the other one?" or "give me more detail on that").
-4. Never merge two unrelated topics together.
-5. Return ONLY the (possibly enhanced) question — no explanation, no preamble.
-
-Example of when NOT to enhance:
-  Previous: "get broadband design docs from Confluence"
-  Current:  "get details of the abc repository on GitLab"
-  → Return unchanged: "get details of the abc repository on GitLab"
-  (Different systems, unrelated topics.)
-
-Example of when TO enhance:
-  Previous: "get details of the abc repository on GitLab"
-  Current:  "what open merge requests does it have?"
-  → Enhanced: "what open merge requests does the abc repository on GitLab have?"
-
-Recent conversation:
-{context}
-
-Current question: {last_message}
-
-Enhanced question:"""
+    enhancement_prompt = QUESTION_ENHANCEMENT_PROMPT.format(
+        context=context,
+        last_message=last_message,
+    )
 
     llm = model
     response = llm.invoke([HumanMessage(content=enhancement_prompt)])
@@ -166,7 +143,10 @@ if __name__ == "__main__":
     conversation = [
         HumanMessage(content="What is machine learning?"),
         AIMessage(
-            content="Machine learning is a subset of AI that enables computers to learn from data."
+            content=(
+                "Machine learning is a subset of AI that enables"
+                " computers to learn from data."
+            )
         ),
         HumanMessage(content="How does it work in practice?"),
     ]

@@ -13,6 +13,10 @@ from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
 from langchain_core.stores import BaseStore
 from framework_base.doc_store import PostgresDocStore, get_document_store
+from agents.prompts.kb_search.search_prompts import (
+    KB_SEARCH_WITH_CONTEXT_PROMPT,
+    KB_SEARCH_NO_CONTEXT_PROMPT,
+)
 from framework_base.llm_base import LLMFactory
 from framework_base.reranker import RerankerFactory
 from framework_base.vector_store import get_vector_store
@@ -55,6 +59,8 @@ class _DocStoreAdapter(BaseStore[str, Document]):
             metadata = {"type": doc_type}
             if raw.get("page") is not None:
                 metadata["page"] = raw["page"]
+            if raw.get("document_name") is not None:
+                metadata["document_name"] = raw["document_name"]
             results.append(Document(page_content=content, metadata=metadata))
         return results
 
@@ -115,14 +121,14 @@ class KnowledgeBaseSearchAgent:
             docs = await retriever.ainvoke(query)
             if docs:
                 context_parts = []
-                for i, doc in enumerate(docs, 1):
+                for doc in docs:
+                    doc_name = doc.metadata.get("document_name", "unknown")
+                    page = doc.metadata.get("page")
+                    page_str = f", page {page + 1}" if page is not None else ""
                     if doc.metadata.get("type") == "table":
-                        label = f"[Table {i}]"
+                        label = f"[Table from {doc_name}{page_str}]"
                     else:
-                        page = doc.metadata.get("page")
-                        label = (
-                            f"[Document {i}" + (f", page {page}" if page else "") + "]"
-                        )
+                        label = f"[{doc_name}{page_str}]"
                     context_parts.append(f"{label}:\n{doc.page_content}")
                 rag_context = "\n\n".join(context_parts)
                 logger.info(
@@ -140,28 +146,10 @@ class KnowledgeBaseSearchAgent:
     def _build_prompt(self, query: str, rag_context: str) -> str:
         """Build the LLM prompt, injecting KB context when available."""
         if rag_context:
-            return (
-                "You are a helpful AI assistant. Use the relevant documents\n"
-                "retrieved from the knowledge base below to answer the "
-                "user's question.\n"
-                "If the retrieved documents do not contain enough information,"
-                " supplement\nwith your general knowledge and say so.\n\n"
-                f"**Relevant context from knowledge base:**\n{rag_context}\n\n"
-                f"**User question:** {query}\n\n"
-                "Provide a clear, accurate answer grounded in the context"
-                " above.\n"
-                "Cite which document(s) support your answer where applicable."
+            return KB_SEARCH_WITH_CONTEXT_PROMPT.format(
+                rag_context=rag_context, query=query
             )
-        return (
-            "You are a helpful AI assistant with access to a knowledge"
-            " base.\n"
-            "No relevant documents were found in the knowledge base for"
-            " this query.\n\n"
-            f"**User question:** {query}\n\n"
-            "Answer using your general knowledge and clearly state that"
-            " no matching\n"
-            "documents were found in the knowledge base."
-        )
+        return KB_SEARCH_NO_CONTEXT_PROMPT.format(query=query)
 
     async def search(self, query: str) -> str:
         """Search the knowledge base and return a grounded answer.

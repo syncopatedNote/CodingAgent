@@ -19,23 +19,23 @@ import {
 } from "lucide-react";
 
 export default function ChatSidebar({ isOpen, onClose, onNewChat, onSelectExample, apiStatus }) {
-  const examples = [
-    { icon: Search, label: "Search API docs", query: "Search for API authentication documentation" },
-    { icon: MessageSquare, label: "What can you do?", query: "What can you help me with?" },
-    { icon: Code2, label: "Generate code", query: "Generate code for CBP-8446" },
-    { icon: Database, label: "Find a ticket", query: "Show me details for PROJ-123" },
-    { icon: Search, label: "Find bugs", query: "Search for recent bugs in production" },
-    { icon: Code2, label: "Confluence search", query: "Find confluence pages about deployment" },
-  ];
+  // const examples = [
+  //   { icon: Search, label: "Search API docs", query: "Search for API authentication documentation" },
+  //   { icon: MessageSquare, label: "What can you do?", query: "What can you help me with?" },
+  //   { icon: Code2, label: "Generate code", query: "Generate code for CBP-8446" },
+  //   { icon: Database, label: "Find a ticket", query: "Show me details for PROJ-123" },
+  //   { icon: Search, label: "Find bugs", query: "Search for recent bugs in production" },
+  //   { icon: Code2, label: "Confluence search", query: "Find confluence pages about deployment" },
+  // ];
 
-  const capabilities = [
-    { icon: Search, title: "Intelligent Search", desc: "Confluence, Jira, vector RAG" },
-    { icon: Code2, title: "Code Generation", desc: "From Jira tickets + GitLab" },
-    { icon: Zap, title: "Smart Routing", desc: "Automatic task classification" },
-    { icon: Database, title: "Enterprise RAG", desc: "Multi-modal document processing" },
-    { icon: GitBranch, title: "MCP Integrations", desc: "Confluence, Jira, GitLab" },
-    { icon: Sparkles, title: "Multi-LLM", desc: "Ollama, OpenAI, AWS Bedrock" },
-  ];
+  // const capabilities = [
+  //   { icon: Search, title: "Intelligent Search", desc: "Confluence, Jira, vector RAG" },
+  //   { icon: Code2, title: "Code Generation", desc: "From Jira tickets + GitLab" },
+  //   { icon: Zap, title: "Smart Routing", desc: "Automatic task classification" },
+  //   { icon: Database, title: "Enterprise RAG", desc: "Multi-modal document processing" },
+  //   { icon: GitBranch, title: "MCP Integrations", desc: "Confluence, Jira, GitLab" },
+  //   { icon: Sparkles, title: "Multi-LLM", desc: "Ollama, OpenAI, AWS Bedrock" },
+  // ];
 
   return (
     <>
@@ -64,7 +64,6 @@ export default function ChatSidebar({ isOpen, onClose, onNewChat, onSelectExampl
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
               <Bot className="w-4 h-4 text-white" />
             </div>
-            <span className="font-semibold text-sm text-foreground">Cortex</span>
           </div>
           <button
             onClick={onClose}
@@ -102,8 +101,8 @@ export default function ChatSidebar({ isOpen, onClose, onNewChat, onSelectExampl
         </div>
 
         {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto px-3 pb-3">
-          {/* Try These */}
+        {/* <div className="flex-1 overflow-y-auto px-3 pb-3">
+          Try These
           <div className="mb-4">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted px-2 mb-2">
               Try these
@@ -120,10 +119,10 @@ export default function ChatSidebar({ isOpen, onClose, onNewChat, onSelectExampl
                 </button>
               ))}
             </div>
-          </div>
+          </div> */}
 
           {/* Capabilities */}
-          <div>
+          {/* <div>
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted px-2 mb-2">
               Capabilities
             </p>
@@ -142,7 +141,7 @@ export default function ChatSidebar({ isOpen, onClose, onNewChat, onSelectExampl
               ))}
             </div>
           </div>
-        </div>
+        </div> */}
 
         {/* Footer */}
         <div className="p-3 border-t border-border dark:border-border-dark space-y-2">

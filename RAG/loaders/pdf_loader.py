@@ -2,117 +2,26 @@ import uuid
 from datetime import datetime, timezone
 
 from framework_base.doc_store import get_document_store
-from framework_base.llm_base import LLMFactory
 from framework_base.vector_store import get_vector_store
 from langchain.retrievers.multi_vector import MultiVectorRetriever
-from langchain.schema.document import Document
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
 from logger import setup_logger
-from settings import settings
-from ..constants import (
-    CHUNK_TYPE_KEY,
-    COLLECTION_NAME,
-    DOC_NAME_KEY,
-    ID_KEY,
-    INGEST_DATE_KEY,
-)
-from ..prompts.search_queries import SEARCH_QUERIES_PROMPT
-from ..prompts.search_questions import SEARCH_QUESTIONS_PROMPT
-from ..prompts.summary import SUMMARY_PROMPT
+from ..constants import COLLECTION_NAME, DOC_NAME_KEY, ID_KEY, INGEST_DATE_KEY
 from ..utils import extract_tables_from_pdf, extract_text_from_pdf
+from .chunk_ingestor import (
+    _build_chunk_vector_docs,
+    _build_hyde_chains,
+    _build_summarize_chain,
+    _parse_lines,
+)
 
 logger = setup_logger(__name__)
-
-_NUMBER_OF_QUESTIONS = 3
-_NUMBER_OF_QUERIES = 3
-
-
-def _parse_lines(text: str) -> list[str]:
-    return [line.strip() for line in text.strip().splitlines() if line.strip()]
-
-
-def _build_summarize_chain():
-    model = LLMFactory.create_llm(
-        provider=settings.llm_provider,
-        model_name=settings.llm_model_name,
-        model_type=settings.llm_model_type,
-        temperature=0.3,
-    )
-    prompt = ChatPromptTemplate.from_template(SUMMARY_PROMPT)
-    return {"element": lambda x: x} | prompt | model | StrOutputParser()
-
-
-def _build_hyde_chains():
-    model = LLMFactory.create_llm(
-        provider=settings.llm_provider,
-        model_name=settings.llm_model_name,
-        model_type=settings.llm_model_type,
-        temperature=0.3,
-    )
-    parser = StrOutputParser()
-    q_prompt = ChatPromptTemplate.from_template(SEARCH_QUESTIONS_PROMPT)
-    sq_prompt = ChatPromptTemplate.from_template(SEARCH_QUERIES_PROMPT)
-    questions_chain = (
-        {"chunk": lambda x: x, "n": lambda _: _NUMBER_OF_QUESTIONS}
-        | q_prompt
-        | model
-        | parser
-    )
-    queries_chain = (
-        {"chunk": lambda x: x, "n": lambda _: _NUMBER_OF_QUERIES}
-        | sq_prompt
-        | model
-        | parser
-    )
-    return questions_chain, queries_chain
-
-
-def _build_chunk_vector_docs(
-    chunk_ids: list[str],
-    summaries: list[str],
-    questions_per_chunk: list[list[str]],
-    queries_per_chunk: list[list[str]],
-    document_name: str,
-    ingestion_date: str,
-    chunk_type: str,
-) -> list[Document]:
-    """Produce 3 vector Documents per chunk, all pointing to the same doc_id.
-
-    1. Summary  — prose overview for broad/topic-level queries.
-    2. Questions — joined hypothetical questions for natural-language queries.
-    3. Queries   — joined search terms for keyword/mixed-style queries.
-
-    Each Document carries ID_KEY so MultiVectorRetriever fetches the original
-    chunk from the docstore on retrieval hit.
-    """
-    docs = []
-    for chunk_id, summary, questions, queries in zip(
-        chunk_ids, summaries, questions_per_chunk, queries_per_chunk
-    ):
-        shared_metadata = {
-            ID_KEY: chunk_id,
-            DOC_NAME_KEY: document_name,
-            INGEST_DATE_KEY: ingestion_date,
-            CHUNK_TYPE_KEY: chunk_type,
-        }
-        if summary.strip():
-            docs.append(Document(page_content=summary, metadata=shared_metadata))
-        if questions:
-            docs.append(
-                Document(page_content="\n".join(questions), metadata=shared_metadata)
-            )
-        if queries:
-            docs.append(
-                Document(page_content="\n".join(queries), metadata=shared_metadata)
-            )
-    return docs
 
 
 def ingest_pdf(file_path: str, document_name: str) -> dict:
     """Extract text + tables from a PDF and load into the vector DB.
 
-    Each chunk produces 3 vectors in ChromaDB, all pointing to the same doc_id:
+    Each chunk produces up to 3 vectors in ChromaDB, all pointing to the same
+    doc_id:
       1. Summary        — broad topic recall
       2. HyDE questions — natural-language query recall
       3. HyDE queries   — keyword/mixed-style query recall
@@ -127,16 +36,17 @@ def ingest_pdf(file_path: str, document_name: str) -> dict:
     text_strings = [c["text"] for c in text_chunks]
 
     try:
-        tables = extract_tables_from_pdf(file_path=file_path)
+        table_entries = extract_tables_from_pdf(file_path=file_path)
     except Exception:
         # tabula-py needs Java; if missing in the worker image, skip tables
         # rather than failing the whole ingest.
         logger.warning(
             "Table extraction failed; continuing without tables", exc_info=True
         )
-        tables = []
+        table_entries = []
 
-    table_html = [t.to_html() for t in tables] if tables else []
+    table_html = [e["table"].to_html() for e in table_entries]
+    table_pages = [e["page"] for e in table_entries]
 
     logger.info(f"Extracted {len(text_strings)} text chunks, {len(table_html)} tables")
 
@@ -243,6 +153,7 @@ def ingest_pdf(file_path: str, document_name: str) -> dict:
                     table_ids[i],
                     {
                         "type": "table",
+                        "page": table_pages[i],
                         "html": table_html[i],
                         DOC_NAME_KEY: document_name,
                         INGEST_DATE_KEY: ingestion_date,
@@ -252,9 +163,11 @@ def ingest_pdf(file_path: str, document_name: str) -> dict:
             ]
         )
 
+    n_text = len(text_strings)
+    n_table = len(table_html)
     logger.info(
-        f"Stored {text_vector_count} text vectors ({len(text_strings)} chunks × 3) "
-        f"and {table_vector_count} table vectors ({len(table_html)} tables × 3)"
+        f"Stored {text_vector_count} text vectors ({n_text} chunks × 3) "
+        f"and {table_vector_count} table vectors ({n_table} tables × 3)"
     )
 
     return {
