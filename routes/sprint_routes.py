@@ -28,14 +28,27 @@ _sprint_start_agent = SprintStartAgent()
 
 
 class JiraSprintDetail(BaseModel):
-    id: Optional[Any] = Field(None, description="Numeric sprint ID from Jira")
-    name: Optional[str] = Field(None, description="Human-readable sprint name")
+    id: int = Field(..., description="Numeric sprint ID")
+    self: Optional[str] = Field(None, description="REST API URL for this sprint")
+    state: Optional[str] = Field(
+        None, description="Sprint state: active, closed, future"
+    )
+    name: str = Field(..., description="Sprint display name")
+    startDate: Optional[str] = Field(None, description="ISO 8601 sprint start date")
+    endDate: Optional[str] = Field(None, description="ISO 8601 sprint end date")
+    originBoardId: Optional[int] = Field(
+        None, description="ID of the board this sprint belongs to"
+    )
+    goal: Optional[str] = Field(None, description="Sprint goal text")
 
     model_config = {"extra": "allow"}
 
 
 class JiraWebhookPayload(BaseModel):
-    webhookEvent: str = Field("", description="Jira event type, e.g. 'sprint_started'")
+    timestamp: Optional[int] = Field(
+        None, description="Unix epoch ms when the event fired"
+    )
+    webhookEvent: str = Field(..., description="Jira event type, e.g. 'sprint_started'")
     sprint: Optional[JiraSprintDetail] = Field(
         None, description="Sprint details (present on sprint events)"
     )
@@ -121,14 +134,8 @@ async def jira_sprint_webhook(
             "event": payload.webhookEvent,
         }
 
-    sprint_id: Optional[str] = (
-        str(payload.sprint.id).strip() if payload.sprint and payload.sprint.id else ""
-    )
-    sprint_name: str = (
-        payload.sprint.name or sprint_id or "unknown"
-        if payload.sprint
-        else sprint_id or "unknown"
-    )
+    sprint_id: str = str(payload.sprint.id) if payload.sprint else ""
+    sprint_name: str = payload.sprint.name if payload.sprint else sprint_id or "unknown"
 
     if not sprint_id:
         raise HTTPException(
