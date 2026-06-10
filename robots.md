@@ -4,7 +4,8 @@
 
 A multi-agent AI assistant (called **Cortex**) with:
 - A LangGraph **Supervisor Agent** that routes to Search, Coding, KB Search, and General Chat sub-agents
-- A **RAG pipeline** (S3 → Temporal worker → ChromaDB summaries + PostgreSQL originals)
+- A **Sprint Start Agent** that listens for Jira `sprint_started` webhooks and autonomously drives the Coding Agent for every open ticket — no human interaction required
+- A **RAG pipeline** (S3 → Temporal worker → pgvector summaries + PostgreSQL originals)
 - **AG-UI protocol** streaming between the Next.js frontend and the FastAPI backend
 - MCP integrations: Atlassian, GitLab, GitHub, Context7
 
@@ -21,13 +22,16 @@ docker compose logs -f supervisor-api
 docker compose logs -f rag-worker
 docker compose logs -f rag-service
 
-# Rebuild a single service after code changes
+# Pick up Python code changes (no rebuild needed — volume-mounted repo)
+docker compose restart supervisor-api
+
+# Rebuild after requirements.txt changes
 docker compose up -d --build supervisor-api
 
 # Full teardown (keeps volumes)
 docker compose down
 
-# Teardown + wipe all persistent data (Postgres, Chroma)
+# Teardown + wipe all persistent data (Postgres + pgvector)
 docker compose down -v
 ```
 
@@ -40,7 +44,6 @@ docker compose down -v
 | RAG Service + Swagger | http://localhost:8001/docs |
 | Temporal UI | http://localhost:8080 |
 | LiteLLM proxy | http://localhost:4000 |
-| ChromaDB | http://localhost:8002 |
 
 **Quick health check:**
 ```bash
@@ -60,6 +63,7 @@ Coding_agent/
 │   ├── supervisor_routes.py   # /api/supervisor/chat and /api/supervisor/agent (AG-UI)
 │   ├── knowledge_base_routes.py # /api/knowledge-base/agent (AG-UI)
 │   ├── documents_routes.py    # /api/documents list + delete
+│   ├── sprint_routes.py       # /api/sprint/webhook/jira — Jira webhook receiver
 │   └── mcp_routes.py
 │
 ├── agents/                    # Business logic for each agent
@@ -68,12 +72,13 @@ Coding_agent/
 │   ├── search_agent.py        # MCP tool calls (Confluence, Jira, GitLab)
 │   ├── kb_search_agent.py     # MultiVectorRetriever → PostgreSQL → LLM
 │   ├── langgraph_coding_agent.py  # Jira ticket → code → GitLab
+│   ├── sprint_start_agent.py  # Sprint webhook → fetch tickets → autonomous coding runs
 │   ├── general_chat_agent.py  # Direct LLM, no tools
 │   └── question_enhancer_agent.py # Rewrites follow-ups from history
 │
 ├── framework_base/            # Shared infrastructure
 │   ├── llm_base.py            # LLMFactory — single way to get an LLM instance
-│   ├── vector_store.py        # get_vector_store() — ChromaDB client
+│   ├── vector_store.py        # get_vector_store() — PGVector client (sync + async modes)
 │   ├── doc_store.py           # get_document_store() — PostgresDocStore (psycopg3)
 │   └── mcp_servers/registry.py  # MCP server registration + SSE transport
 │
@@ -188,8 +193,15 @@ All RAG metadata keys are constants in `RAG/constants.py`. Import them everywher
 from RAG.constants import ID_KEY, DOC_NAME_KEY, INGEST_DATE_KEY, CHUNK_TYPE_KEY, COLLECTION_NAME
 ```
 
-### PostgreSQL docstore
-`get_document_store(collection_name)` returns a `PostgresDocStore`. It takes the DSN from `settings.postgres_dsn`. Values are stored as JSONB dicts; do not store `Document` objects directly — store plain dicts and convert at retrieval time (see `_DocStoreAdapter` in `kb_search_agent.py`).
+### PostgreSQL + pgvector
+The project uses a single PostgreSQL instance (`pgvector/pgvector:pg16`) for three purposes:
+- **pgvector** (`langchain_pg_embedding` / `langchain_pg_collection`): vector embeddings for RAG retrieval
+- **PostgresDocStore**: original document chunks keyed by `doc_id` (JSONB)
+- **Temporal backend**: workflow/activity history
+
+`get_vector_store(collection_name, async_mode=False)` returns a `PGVector` instance. Pass `async_mode=True` for async callers (retrieval); leave it `False` for sync callers (ingestion loaders). Both read `settings.postgres_dsn`.
+
+`get_document_store(collection_name)` returns a `PostgresDocStore`. Values are stored as JSONB dicts; do not store `Document` objects directly — store plain dicts and convert at retrieval time (see `_DocStoreAdapter` in `kb_search_agent.py`).
 
 ### Temporal workflows
 - Task queue name: `"rag-ingestion"` — worker and client must match
@@ -197,25 +209,43 @@ from RAG.constants import ID_KEY, DOC_NAME_KEY, INGEST_DATE_KEY, CHUNK_TYPE_KEY,
 - Workflows must be deterministic: no `datetime.now()`, `random`, or `asyncio.sleep` inside workflow code — use Temporal's APIs instead
 - The worker uses `UnsandboxedWorkflowRunner` to allow heavy imports (PyMuPDF, tabula)
 
+### Sprint Start Agent
+`SprintStartAgent` is triggered by a Jira `sprint_started` webhook at `POST /api/sprint/webhook/jira`. It:
+1. Calls `jira_search` (MCP Atlassian) to find all open Stories, Tasks, and Bugs in the sprint
+2. Calls `jira_get_issue` for full details on each ticket
+3. Runs `LangGraphCodingAgent` in `autonomous` mode for each ticket (no human prompts)
+4. Processes tickets sequentially by default; set `SPRINT_START_MAX_CONCURRENT > 1` for parallel runs (each parallel run gets its own agent instance to avoid tool-cache races)
+
+Webhook signature validation (HMAC-SHA256 via `X-Hub-Signature`) is enforced when `JIRA_WEBHOOK_SECRET` is set; disabled with a warning when unset.
+
 ---
 
 ## Key environment variables
 
 | Variable | Used by | Notes |
 |---|---|---|
-| `POSTGRES_DSN` | supervisor-api, rag-worker | Full psycopg3 DSN |
+| `POSTGRES_DSN` | supervisor-api, rag-worker | Full psycopg3 DSN — no default, must be set |
 | `LLM_PROVIDER` | supervisor-api, rag-worker | `litellm` is default |
 | `LLM_MODEL_NAME` | supervisor-api, rag-worker | e.g. `gpt-4o-mini` |
 | `LITELLM_PROXY_URL` | supervisor-api, rag-worker | `http://litellm:4000` in Docker |
-| `CHROMA_SERVER_HOST` | supervisor-api, rag-worker | `chroma` in Docker, `localhost` locally |
 | `TEMPORAL_HOST` | rag-service, rag-worker | `temporal:7233` in Docker |
 | `S3_BUCKET_NAME` | rag-service, rag-worker | Upload bucket |
 | `RAG_AWS_ACCESS_KEY_ID` | rag-service, rag-worker | Separate from Bedrock credentials |
+| `JIRA_WEBHOOK_SECRET` | supervisor-api | HMAC-SHA256 secret for Jira webhook validation; unset = validation disabled |
+| `SPRINT_START_MAX_CONCURRENT` | supervisor-api | Max parallel ticket runs per sprint (default: 1) |
+
+Minimum `.env` to run locally without Docker:
+```env
+POSTGRES_DSN=postgresql://appname:apppass@localhost:port/app   //pragma: allowlist secret
+TEMPORAL_HOST=localhost:7233
+LLM_PROVIDER=litellm
+LITELLM_PROXY_URL=http://localhost:4000
+LITELLM_MASTER_KEY=sk-1234
+```
+
 ---
 
 ## Gotchas
-
-**ChromaDB `host` in Docker vs local**: Inside Compose it is `chroma`. Outside it is `localhost`. `CHROMA_SERVER_HOST` controls this — don't hardcode it.
 
 **`POSTGRES_DSN` has no default**: The field in `settings.py` has no `default=` — if the env var is missing the app will refuse to start with a validation error. Always set it.
 
@@ -223,11 +253,17 @@ from RAG.constants import ID_KEY, DOC_NAME_KEY, INGEST_DATE_KEY, CHUNK_TYPE_KEY,
 
 **`_DocStoreAdapter` is read-only**: The adapter in `kb_search_agent.py` that wraps `PostgresDocStore` for `MultiVectorRetriever` intentionally raises `NotImplementedError` on `mset`. Writes go through `pdf_loader.py` directly, not via the retriever's docstore interface.
 
+**`get_vector_store` has two modes**: Pass `async_mode=True` for async callers (KB search retrieval). Pass `async_mode=False` (default) for sync callers (ingestion loaders). Mixing them up causes SQLAlchemy greenlet errors — the sync engine cannot be used with `asimilarity_search`, and the async engine cannot be used from sync code.
+
 **Temporal replay safety**: Any code inside a `@workflow.defn` class is replayed on restart. Side-effecting code (S3 calls, DB writes, LLM calls) must live in `@activity.defn` functions, not directly in the workflow body.
 
 **AG-UI interrupt state is in-memory**: `InterruptManager` stores pending interrupts in a dict. They are lost on supervisor-api restart. If the user was mid-interrupt when the pod restarts, the resume call will silently fall back to a fresh run.
 
-**`supervisor-api` mounts the repo as a volume** (`- .:/app`) in Compose. Code changes are reflected immediately for the API — you do not need to rebuild. The rag-worker and rag-service do not have this mount and require `--build`.
+**`supervisor-api` code changes need a restart, not a rebuild**: The repo is volume-mounted into the container (`- .:/app`), so edited `.py` files are immediately present inside the container. However, uvicorn runs without `--reload`, so modules are only re-imported on process start. Run `docker compose restart supervisor-api` to pick up code changes — no `--build` needed unless `requirements.txt` changed. The rag-worker and rag-service have no volume mount and always require `--build` for code changes.
+
+**`JIRA_WEBHOOK_SECRET` should always be set in production**: Without it, the sprint webhook endpoint accepts any POST request. Set it to the secret configured in the Jira webhook registration.
+
+**pgvector extension must exist before first use**: The `init-pgvector.sql` file is mounted into the Postgres container and runs `CREATE EXTENSION IF NOT EXISTS vector` on first startup. If you connect to the database before this runs (e.g. a fresh `docker compose up`), the extension won't be there yet. Let the container reach healthy state before running the API.
 
 ---
 
@@ -237,6 +273,11 @@ from RAG.constants import ID_KEY, DOC_NAME_KEY, INGEST_DATE_KEY, CHUNK_TYPE_KEY,
 1. Add to `.env` and `.env.example`
 2. Add a `Field(alias="MY_VAR")` to `Settings` in `settings.py`
 3. Reference via `settings.my_var`
+
+**Pick up code changes in supervisor-api:**
+```bash
+docker compose restart supervisor-api
+```
 
 **Trigger a document ingest manually (bypassing the upload UI):**
 ```bash
@@ -249,18 +290,32 @@ ingest_pdf('/path/to/file.pdf', 'my-document')
 
 **Wipe and re-ingest all documents:**
 ```bash
-# Delete via API (removes from both Chroma and Postgres)
+# Delete via API (removes from both pgvector and Postgres docstore)
 curl -X DELETE http://localhost:8000/api/documents/my-document.pdf
 ```
+
+**Trigger sprint automation manually (bypassing the webhook):**
+```bash
+curl -X POST http://localhost:8000/api/sprint/webhook/jira \
+  -H "Content-Type: application/json" \
+  -d '{"webhookEvent": "sprint_started", "sprint": {"id": "123", "name": "Sprint 1"}}'
+```
+Note: omit the signature header only if `JIRA_WEBHOOK_SECRET` is unset.
 
 **Inspect Temporal workflows:**
 Open http://localhost:8080 — shows all workflow runs, their history, and activity failures with full stack traces.
 
 **Check what's in the vector store:**
 ```python
-from framework_base.vector_store import get_vector_store
-vs = get_vector_store(collection_name="uploads")
-print(vs._collection.count())
+import psycopg
+from settings import settings
+with psycopg.connect(settings.postgres_dsn) as conn:
+    count = conn.execute(
+        "SELECT COUNT(*) FROM langchain_pg_embedding e "
+        "JOIN langchain_pg_collection c ON e.collection_id = c.uuid "
+        "WHERE c.name = 'uploads'"
+    ).fetchone()[0]
+    print(count)
 ```
 
 ---
@@ -275,6 +330,7 @@ print(vs._collection.count())
 - Do not add defaults to `POSTGRES_DSN` in `settings.py` — it must be explicitly set
 - Do not commit real credentials to `.env` — `.env` is gitignored but double-check
 - Do not define prompts as inline strings inside agent or loader files — every prompt belongs in the service's `prompts/` directory (`agents/prompts/` or `RAG/prompts/`)
+- Do not deploy the sprint webhook endpoint without setting `JIRA_WEBHOOK_SECRET`
 
 ---
 

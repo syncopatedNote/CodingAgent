@@ -20,7 +20,7 @@ logger = setup_logger(__name__)
 def ingest_pdf(file_path: str, document_name: str) -> dict:
     """Extract text + tables from a PDF and load into the vector DB.
 
-    Each chunk produces up to 3 vectors in ChromaDB, all pointing to the same
+    Each chunk produces up to 3 vectors in pgvector, all pointing to the same
     doc_id:
       1. Summary        — broad topic recall
       2. HyDE questions — natural-language query recall

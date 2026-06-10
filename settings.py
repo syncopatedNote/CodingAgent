@@ -59,12 +59,8 @@ class Settings(BaseSettings):
         default="http://localhost:11434", alias="OLLAMA_BASE_URL"
     )
 
-    # PostgreSQL docstore
+    # PostgreSQL docstore + pgvector store
     postgres_dsn: str = Field(alias="POSTGRES_DSN")
-
-    # Chroma (vector DB) Configuration (hosted service only)
-    chroma_server_host: str = Field(default="", alias="CHROMA_SERVER_HOST")
-    chroma_server_http_port: int = Field(default=0, alias="CHROMA_SERVER_HTTP_PORT")
 
     # Embedding model configuration (local HuggingFace)
     hf_embed_model: str = Field(
@@ -83,6 +79,12 @@ class Settings(BaseSettings):
     mcp_gitlab_enabled: bool = Field(default=True, alias="MCP_GITLAB_ENABLED")
     mcp_github_enabled: bool = Field(default=True, alias="MCP_GITHUB_ENABLED")
     mcp_context7_enabled: bool = Field(default=True, alias="MCP_CONTEXT7_ENABLED")
+
+    # Sprint Start Agent
+    jira_webhook_secret: str = Field(default="", alias="JIRA_WEBHOOK_SECRET")
+    sprint_start_max_concurrent: int = Field(
+        default=1, alias="SPRINT_START_MAX_CONCURRENT"
+    )
 
     class Config:
         env_file = ".env"

@@ -22,7 +22,7 @@ def ingest_text_file(file_path: str, document_name: str) -> dict:
 
     Applies the same multi-vector pipeline as the PDF loader:
       - RecursiveCharacterTextSplitter for chunking
-      - Each chunk produces 3 vectors in ChromaDB (summary, HyDE questions,
+      - Each chunk produces 3 vectors in pgvector (summary, HyDE questions,
         HyDE queries), all pointing to the same doc_id in the docstore
       - Docstore holds the original chunk text keyed by doc_id
 

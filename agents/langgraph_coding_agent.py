@@ -54,6 +54,9 @@ from agents.prompts.coding_supervisor.system import (
     CODING_SUPERVISOR_SYSTEM_PROMPT,
     CODING_SUPERVISOR_DEGRADED_SUFFIX,
 )
+from agents.prompts.coding_supervisor.autonomous import (
+    CODING_SUPERVISOR_AUTONOMOUS_PROMPT,
+)
 from agents.prompts.coding_supervisor.nudge import CODING_SUPERVISOR_NUDGE_PROMPT
 from agents.prompts.coding_supervisor.generate_code import GENERATE_CODE_PROMPT
 from agents.prompts.coding_supervisor.review_code import REVIEW_CODE_PROMPT
@@ -73,6 +76,7 @@ class CodingTaskState(TypedDict):
     """
 
     messages: Annotated[list[BaseMessage], add_messages]
+    mode: str  # "interactive" | "autonomous"
 
 
 # ── Custom Tools (non-MCP) ─────────────────────────────────────────
@@ -212,6 +216,8 @@ class LangGraphCodingAgent:
 
     def __init__(self):
         self._tools: Optional[list] = None
+        self._tools_autonomous: Optional[list] = None
+        self._mcp_tool_map: Optional[dict] = None
         self._custom_tools = [ask_user, generate_code, review_code]
         self.checkpointer = MemorySaver()
 
@@ -234,16 +240,11 @@ class LangGraphCodingAgent:
     # Keeps the tool schema within a reasonable token budget.
     _MAX_GATEWAY_DESC_CHARS = 4000
 
-    async def _load_tools(self) -> list:
-        """Load MCP tools behind a single gateway tool.
-
-        Instead of binding every MCP tool individually to the
-        LLM (which can exceed the context window), all MCP
-        tools are exposed through one ``run_mcp_tool`` gateway.
-        The LLM sees only 4 bound tools regardless of how many
-        MCP tools are available.
-        """
-        self._mcp_tool_map: dict[str, Any] = {}
+    async def _ensure_mcp_tools_loaded(self) -> None:
+        """Load MCP tools once; subsequent calls are no-ops."""
+        if self._mcp_tool_map is not None:
+            return
+        self._mcp_tool_map = {}
         self._mcp_load_error: Optional[str] = None
         try:
             raw_tools = await multi_server_mcp_client.get_tools()
@@ -261,12 +262,25 @@ class LangGraphCodingAgent:
             self._mcp_load_error = error_msg
             logger.error(error_msg)
 
-        combined = list(self._custom_tools)
+    async def _load_tools(self, mode: str = "interactive") -> list:
+        """Build the bound tool list for the given mode.
+
+        In ``autonomous`` mode ``ask_user`` is excluded so the LLM
+        cannot pause for human input even if it tries.  MCP tools
+        are loaded once and reused across both modes.
+        """
+        await self._ensure_mcp_tools_loaded()
+
+        if mode == "autonomous":
+            combined = [t for t in self._custom_tools if t.name != "ask_user"]
+        else:
+            combined = list(self._custom_tools)
+
         if self._mcp_tool_map:
             combined.append(self._make_mcp_gateway())
 
         logger.info(
-            f"Coding agent has {len(combined)} bound tools: "
+            f"Coding agent ({mode}) has {len(combined)} bound tools: "
             f"{[t.name for t in combined]}"
         )
         return combined
@@ -477,13 +491,25 @@ class LangGraphCodingAgent:
 
     async def _supervisor_node(self, state: CodingTaskState) -> dict:
         """The hub: assess state and pick the next tool call."""
-        if self._tools is None:
-            self._tools = await self._load_tools()
+        mode = state.get("mode", "interactive")
 
-        llm_with_tools = self.llm.bind_tools(self._tools)
+        if mode == "autonomous":
+            if self._tools_autonomous is None:
+                self._tools_autonomous = await self._load_tools(mode="autonomous")
+            tools = self._tools_autonomous
+        else:
+            if self._tools is None:
+                self._tools = await self._load_tools()
+            tools = self._tools
 
-        # Build system prompt, appending MCP status if degraded
-        system_prompt = CODING_SUPERVISOR_SYSTEM_PROMPT
+        llm_with_tools = self.llm.bind_tools(tools)
+
+        # Select system prompt for the current mode
+        if mode == "autonomous":
+            system_prompt = CODING_SUPERVISOR_AUTONOMOUS_PROMPT
+        else:
+            system_prompt = CODING_SUPERVISOR_SYSTEM_PROMPT
+
         if getattr(self, "_mcp_load_error", None):
             system_prompt += CODING_SUPERVISOR_DEGRADED_SUFFIX.format(
                 mcp_load_error=self._mcp_load_error
@@ -686,6 +712,7 @@ class LangGraphCodingAgent:
         thread_id: Optional[str] = None,
         *,
         resume_value: Any = None,
+        mode: str = "interactive",
     ) -> Dict[str, Any]:
         """Start or resume the coding agent.
 
@@ -699,6 +726,11 @@ class LangGraphCodingAgent:
             A new UUID is generated when omitted.
         resume_value : Any, optional
             The user's response when resuming from an interrupt.
+        mode : str
+            ``"interactive"`` (default) enables ``ask_user`` and
+            the interactive system prompt.  ``"autonomous"``
+            excludes ``ask_user`` from the tool list and uses the
+            autonomous prompt — suitable for unattended processing.
 
         Returns
         -------
@@ -717,10 +749,14 @@ class LangGraphCodingAgent:
 
         try:
             if resume_value is not None:
+                # mode is restored from the checkpoint — no need to re-pass
                 result = await self.graph.ainvoke(Command(resume=resume_value), config)
             else:
                 result = await self.graph.ainvoke(
-                    {"messages": [HumanMessage(content=user_input)]},
+                    {
+                        "messages": [HumanMessage(content=user_input)],
+                        "mode": mode,
+                    },
                     config,
                 )
 
