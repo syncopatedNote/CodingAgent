@@ -18,7 +18,7 @@ from langchain_core.messages import (
 )
 from langchain_mcp_adapters.tools import load_mcp_tools
 from framework_base.llm_base import LLMFactory
-from framework_base.multi_server_mcp_client import get_read_only_tools
+from framework_base.mcp_servers.multi_server_mcp_client import get_read_only_tools
 from framework_base.mcp_servers.registry import get_mcp_registry
 from agents.components.search_classifier import classify_search_query, SearchCategory
 from agents.prompts.search.tool_calling import SEARCH_TOOL_CALLING_PROMPT

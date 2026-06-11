@@ -7,9 +7,6 @@ REQUIREMENTS:
 CODEBASE CONTEXT:
 {context}
 
-DEVELOPMENT GUIDELINES:
-{guidelines}
-
 {extra}
 
 Provide complete, production-ready code that:

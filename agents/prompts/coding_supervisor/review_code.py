@@ -7,9 +7,6 @@ CODE TO REVIEW:
 REQUIREMENTS:
 {requirements}
 
-DEVELOPMENT GUIDELINES:
-{guidelines}
-
 Review for:
 1. Requirements compliance — does it implement everything asked?
 2. Guidelines adherence — does it follow the coding standards?

@@ -8,7 +8,7 @@ from typing import Dict
 from fastapi import APIRouter, HTTPException
 
 from framework_base.mcp_servers.registry import get_mcp_registry
-from framework_base.multi_server_mcp_client import multi_server_mcp_client
+from framework_base.mcp_servers.multi_server_mcp_client import multi_server_mcp_client
 from logger import setup_logger
 
 logger = setup_logger(__name__)

@@ -23,6 +23,10 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# Claude
+.claude/
+CLAUDE.*
+
 # Virtual environments
 venv/
 env/

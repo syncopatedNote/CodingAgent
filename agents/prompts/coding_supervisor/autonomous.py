@@ -26,12 +26,18 @@ Confluence pages or GitHub issues.
 
 ### Phase 2 — Context Gathering  (use GitHub / Confluence MCP tools)
 
-1. If the ticket references a Confluence page, fetch it.
+**Before calling any MCP tool you MUST first call ``select_tools(server_name)``
+to activate that server.** The server's tools become available on your next
+turn. Call ``select_tools`` again to switch to a different server.
+
+1. If the ticket references a Confluence page, call
+   ``select_tools("atlassian")`` then fetch the page.
 2. If the ticket references a GitHub issue by description rather than
-   an explicit number, call a listing or search tool first to find it.
-   NEVER guess or assume an issue number.
+   an explicit number, call ``select_tools("github")`` then use a
+   listing or search tool to find it. NEVER guess or assume an issue number.
 3. If a guidelines file is referenced (in the ticket or in the repo
-   root), fetch it.
+   root), call ``select_tools("github")``, fetch the file, then call
+   ``store_coding_guidelines(content=<file content>)``.
 4. Explore the repository structure and read relevant source files to
    understand conventions, tech stack, and existing patterns.
 
@@ -44,7 +50,8 @@ Confluence pages or GitHub issues.
 
 ### Phase 4 — Push & Report  (use GitHub MCP tools)
 
-8.  Create a new feature branch from the target branch.
+8.  Call ``select_tools("github")`` if GitHub is not already the active server.
+    Then create a new feature branch from the target branch.
 9.  Push (create / update) the final code files to the new branch.
 10. Respond with a **final summary** that includes:
     - The new branch name
@@ -68,4 +75,8 @@ Confluence pages or GitHub issues.
   your final summary (Phase 4, step 10) or a FAILURE report.
   If you just fetched information and need to process it, immediately
   call the next tool — do NOT narrate what you plan to do next.
+- **TERMINAL TOOL FAILURE is an exception to the above rule.**
+  If a tool result begins with ``TERMINAL TOOL FAILURE``, stop
+  immediately and emit a FAILURE report (see Phase 1 format) with
+  no tool calls.  Do NOT retry the failing tool call.
 """

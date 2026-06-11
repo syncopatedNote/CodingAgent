@@ -19,7 +19,7 @@ from logger import setup_logger
 
 # Import agents
 from .search_agent import SearchAgent
-from .langgraph_coding_agent import LangGraphCodingAgent
+from .coding_agent.langgraph_coding_agent import LangGraphCodingAgent
 from .question_enhancer_agent import enhance_question
 from .general_chat_agent import GeneralChatAgent
 from agents.prompts.main_supervisor.classify_task import (

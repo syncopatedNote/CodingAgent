@@ -13,8 +13,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
-from framework_base.multi_server_mcp_client import multi_server_mcp_client
-from agents.langgraph_coding_agent import LangGraphCodingAgent
+from framework_base.mcp_servers.multi_server_mcp_client import multi_server_mcp_client
+from agents.coding_agent.langgraph_coding_agent import LangGraphCodingAgent
 from logger import setup_logger
 from settings import settings
 

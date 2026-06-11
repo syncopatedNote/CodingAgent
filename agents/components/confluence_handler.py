@@ -9,7 +9,7 @@ from typing import Optional
 from langgraph.types import Command, interrupt
 from langchain_core.messages import AIMessage
 from langchain_mcp_adapters.tools import load_mcp_tools
-from framework_base.multi_server_mcp_client import multi_server_mcp_client
+from framework_base.mcp_servers.multi_server_mcp_client import multi_server_mcp_client
 from .base_state import BaseState
 
 
