@@ -219,16 +219,16 @@ async def supervisor_agent_endpoint(input_data: RunAgentInput, request: Request)
     ) -> AgentResult:
         if context.is_resume:
             saved = context.saved_state or {}
-            coding_thread_id = saved.get("coding_thread_id")
+            pipeline_thread_id = saved.get("pipeline_thread_id")
             answer = (
                 context.resume_data.payload.get("answer", "")
                 if context.resume_data
                 else ""
             )
 
-            result = await supervisor_agent.coding_agent.run(
+            result = await supervisor_agent.coding_pipeline.run(
                 user_input=user_input,
-                thread_id=coding_thread_id,
+                thread_id=pipeline_thread_id,
                 resume_value=answer,
             )
 
@@ -239,7 +239,7 @@ async def supervisor_agent_endpoint(input_data: RunAgentInput, request: Request)
                         reason=InterruptReason.INFO_REQUIRED,
                         payload=result["interrupt"],
                     ),
-                    state_to_save={"coding_thread_id": result["thread_id"]},
+                    state_to_save={"pipeline_thread_id": result["thread_id"]},
                 )
 
             return AgentResult(
@@ -260,7 +260,7 @@ async def supervisor_agent_endpoint(input_data: RunAgentInput, request: Request)
                     reason=InterruptReason.INFO_REQUIRED,
                     payload=coding_result["interrupt"],
                 ),
-                state_to_save={"coding_thread_id": coding_result["thread_id"]},
+                state_to_save={"pipeline_thread_id": coding_result["thread_id"]},
             )
 
         response_data = extract_response_data(final_state)

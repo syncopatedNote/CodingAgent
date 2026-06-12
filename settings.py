@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
@@ -84,6 +86,20 @@ class Settings(BaseSettings):
     jira_webhook_secret: str = Field(default="", alias="JIRA_WEBHOOK_SECRET")
     sprint_start_max_concurrent: int = Field(
         default=1, alias="SPRINT_START_MAX_CONCURRENT"
+    )
+
+    # Coding pipeline (context collector + coding agent)
+    # Branch the coding agent bases its work on, and the branch the development
+    # guidelines file is read from.
+    coding_base_branch: str = Field(default="main", alias="CODING_BASE_BRANCH")
+    # Filename of the mandatory development-guidelines file in the repo root.
+    coding_guidelines_filename: str = Field(
+        default="robots.md", alias="CODING_GUIDELINES_FILENAME"
+    )
+    # Repository owner / org. Mandatory — GitHub MCP push tools fail without it.
+    # The pipeline refuses to run when this is unset.
+    coding_repository_owner: Optional[str] = Field(
+        default=None, alias="CODING_REPOSITORY_OWNER"
     )
 
     class Config:

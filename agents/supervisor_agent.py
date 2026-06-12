@@ -19,7 +19,7 @@ from logger import setup_logger
 
 # Import agents
 from .search_agent import SearchAgent
-from .coding_agent.langgraph_coding_agent import LangGraphCodingAgent
+from .coding_pipeline.coding_pipeline import CodingPipeline
 from .question_enhancer_agent import enhance_question
 from .general_chat_agent import GeneralChatAgent
 from agents.prompts.main_supervisor.classify_task import (
@@ -75,8 +75,8 @@ class SupervisorAgent:
         self.search_agent = SearchAgent()
         self.general_chat_agent = GeneralChatAgent()
 
-        # Initialize coding agent (uses MCP tools for repo access)
-        self.coding_agent = LangGraphCodingAgent()
+        # Coding pipeline: context collector → coding agent
+        self.coding_pipeline = CodingPipeline()
 
         # Build the workflow graph
         self.graph = self._build_graph()
@@ -261,14 +261,14 @@ class SupervisorAgent:
         return state
 
     async def _invoke_coding_agent(self, state: SupervisorState) -> SupervisorState:
-        """Invoke the LangGraph coding agent for code generation.
+        """Invoke the coding pipeline for code generation.
 
-        The coding agent handles its own information gathering via
-        ``ask_user`` interrupts, so we simply forward the user's
-        request and propagate the result.
+        The pipeline's context collector handles information gathering via
+        ``ask_user`` interrupts, so we simply forward the user's request and
+        propagate the result.
         """
         try:
-            result = await self.coding_agent.run(
+            result = await self.coding_pipeline.run(
                 user_input=state["enhanced_question"] or state["user_input"],
             )
             state["coding_agent_result"] = result

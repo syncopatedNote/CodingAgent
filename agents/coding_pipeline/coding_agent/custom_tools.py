@@ -8,7 +8,6 @@ this module's body — its implementation here is intentionally a no-op stub.
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
-from langgraph.types import interrupt
 
 from logger import setup_logger
 from agents.prompts.coding_supervisor.generate_code import GENERATE_CODE_PROMPT
@@ -16,23 +15,6 @@ from agents.prompts.coding_supervisor.review_code import REVIEW_CODE_PROMPT
 from .coding_llm_singleton import code_llm
 
 logger = setup_logger(__name__)
-
-
-@tool
-async def ask_user(question: str) -> str:
-    """Ask the user a question and wait for their response.
-
-    Use this whenever you need information, clarification, or approval
-    from the user.  The question should be clear and specific.
-
-    IMPORTANT: Always call this tool ALONE — never combine it with
-    other tool calls in the same turn.
-
-    Args:
-        question: The question to present to the user.
-    """
-    response = interrupt({"question": question})
-    return str(response)
 
 
 @tool
@@ -130,21 +112,6 @@ async def review_code(
             "The LLM service may be temporarily unavailable. "
             "Please retry or check the service configuration."
         )
-
-
-@tool
-async def store_coding_guidelines(content: str) -> str:
-    """Store fetched coding guidelines so they are automatically applied to
-    every generate_code and review_code call in this session.
-
-    Call this once after fetching the guidelines file — do NOT pass
-    guidelines directly to generate_code or review_code.
-
-    Args:
-        content: Full text of the guidelines file.
-    """
-    # Body is never executed — _tool_executor_node intercepts this call.
-    return content
 
 
 @tool

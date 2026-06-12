@@ -7,14 +7,13 @@ each ticket — no human interaction required.
 """
 
 import asyncio
-import json
 import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
 from framework_base.mcp_servers.multi_server_mcp_client import multi_server_mcp_client
-from agents.coding_agent.langgraph_coding_agent import LangGraphCodingAgent
+from agents.coding_pipeline.coding_pipeline import CodingPipeline
 from logger import setup_logger
 from settings import settings
 
@@ -54,12 +53,12 @@ class SprintStartAgent:
     in a Jira sprint.
 
     Ticket fetching uses MCP Jira tools directly.  Each ticket is
-    processed by a fresh invocation of ``LangGraphCodingAgent`` in
+    processed by a fresh invocation of ``CodingPipeline`` in
     ``autonomous`` mode so no human input is ever requested.
     """
 
     def __init__(self) -> None:
-        self._coding_agent = LangGraphCodingAgent()
+        self._pipeline = CodingPipeline()
 
     async def run(self, sprint_id: str, sprint_name: str = "") -> SprintRunResult:
         """Process all open tickets in the sprint.
@@ -89,15 +88,15 @@ class SprintStartAgent:
 
             async def _bounded(ticket: dict) -> TicketResult:
                 async with semaphore:
-                    # Each parallel run needs its own agent instance
+                    # Each parallel run needs its own pipeline instance
                     # to avoid shared tool-cache race conditions.
-                    agent = LangGraphCodingAgent()
-                    return await self._process_ticket(ticket, agent)
+                    pipeline = CodingPipeline()
+                    return await self._process_ticket(ticket, pipeline)
 
             ticket_results = await asyncio.gather(*[_bounded(t) for t in tickets])
         else:
             ticket_results = [
-                await self._process_ticket(t, self._coding_agent) for t in tickets
+                await self._process_ticket(t, self._pipeline) for t in tickets
             ]
 
         for tr in ticket_results:
@@ -209,7 +208,7 @@ class SprintStartAgent:
         )
 
     async def _process_ticket(
-        self, ticket: dict, agent: LangGraphCodingAgent
+        self, ticket: dict, pipeline: CodingPipeline
     ) -> TicketResult:
         ticket_id = ticket["id"]
 
@@ -225,7 +224,7 @@ class SprintStartAgent:
         logger.info(f"Starting autonomous run for {ticket_id}")
 
         try:
-            result = await agent.run(
+            result = await pipeline.run(
                 user_input=task,
                 thread_id=str(uuid.uuid4()),
                 mode="autonomous",
