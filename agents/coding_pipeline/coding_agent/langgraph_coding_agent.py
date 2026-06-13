@@ -99,14 +99,18 @@ _NARRATION_MARKERS = (
 
 def _render_task(bundle: ContextBundle) -> str:
     """Render the collected context into the seed task message."""
-    owner = settings.coding_repository_owner or "(configured owner)"
+    owner = (
+        bundle.repository_owner
+        or settings.coding_repository_owner
+        or "(configured owner)"
+    )
     design = bundle.confluence_design_details.strip() or "(none provided)"
-    base_branch = bundle.target_branch or settings.coding_base_branch
+    base_branch = bundle.base_branch or settings.coding_base_branch
     return (
         "Implement the following change. All context has already been "
         "gathered for you — do NOT ask for more; do optional read-only "
         "repository searches only if you need to understand structure.\n\n"
-        f"SOURCE REFERENCE: {bundle.source_ref or '(n/a)'}\n"
+        f"REPOSITORY PROVIDER: {bundle.repo_source or '(n/a)'}\n"
         f"REPOSITORY: {bundle.repository_reference or '(n/a)'}\n"
         f"REPOSITORY OWNER: {owner}\n"
         f"TARGET BASE BRANCH: {base_branch}\n\n"
@@ -187,6 +191,8 @@ class LangGraphCodingAgent:
         active_server = state.get("active_mcp_server", "")
         server_tools = self._mcp_tools_by_server.get(active_server, [])
         tools = list(self._custom_tools) + server_tools
+        if not server_tools:
+            logger.debug("No server tools bound to llm for coding supervisor")
 
         logger.debug(
             f"Supervisor bound tools ({mode}): "

@@ -122,7 +122,7 @@ async def select_tools(server_name: str) -> str:
     Call again with a different name to switch servers.
 
     Args:
-        server_name: The server to activate (e.g. "github", "atlassian").
+        server_name: The server to activate (e.g. "github", "gitlab").
     """
     # Body is never executed — _tool_executor_node intercepts this call.
     return server_name

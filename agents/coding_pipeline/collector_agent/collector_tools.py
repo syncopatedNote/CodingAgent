@@ -39,26 +39,40 @@ async def submit_context(
     repository_reference: str,
     development_guidelines: str,
     confluence_design_details: str = "",
-    source_ref: str = "",
-    target_branch: str = "",
+    repo_source: str = "",
+    repository_owner: str = "",
+    base_branch: str = "",
+    git_issue_details: str = "",
 ) -> str:
     """Submit the fully-gathered context and finish context collection.
 
     Call this ONCE, only after you have gathered everything you can. The three
-    required fields must be non-empty; ``development_guidelines`` is mandatory —
-    if you cannot fetch the guidelines file, do NOT call this tool, emit a
-    FAILURE report instead (autonomous) or ask the user (interactive).
+    required fields must be non-empty; ``development_guidelines`` is
+    mandatory — if you cannot fetch the guidelines file, do NOT call this
+    tool, emit a FAILURE report instead (autonomous) or ask the user
+    (interactive).
+
+    The repo fields must be extracted EXACTLY as the GitHub/GitLab MCP tools
+    expect them — do not include URLs, the ".git" suffix, or the owner inside
+    the repository name.
 
     Args:
-        requirements: The core task — the ticket/issue description or the user's
-            pasted requirements.
-        repository_reference: The repository to work in (URL, slug, or project
-            path) discovered from the ticket/issue.
+        requirements: The core task — the ticket/issue description or the
+            user's pasted requirements.
+        repository_reference: For GitHub, the bare repository name (no owner,
+            no URL). For GitLab, the numeric project id.
         development_guidelines: Full text of the development-guidelines file.
         confluence_design_details: Design-doc content, if any was linked.
-        source_ref: The entry-point reference (e.g. "PROJ-123", "owner/repo#42").
-        target_branch: Branch to base work on; defaults to the configured base
+        repo_source: Which provider hosts the repo — exactly "github" or
+            "gitlab".
+        repository_owner: For GitHub, the owner/org parsed from the repo URL or
+            slug (e.g. "acme" from "github.com/acme/repo"). Leave blank for
+            GitLab or to use the configured default owner.
+        base_branch: Branch to base work on; defaults to the configured base
             branch when omitted.
+        git_issue_details: Formatted string from a linked GitHub/GitLab issue,
+            in the form "<issue label> - <issue title> - <issue description>".
+            Leave blank when no git issue was linked on the ticket.
     """
     # Body is never executed — the collector's tool-executor intercepts this
     # call to build the ContextBundle and route the graph to END.

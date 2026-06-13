@@ -132,6 +132,89 @@ class ContextCollectorAgent:
         response = await invoke_llm_with_retry(llm_with_tools, messages)
         return {"messages": [response]}
 
+    def _execute_submit_context(
+        self,
+        args: dict,
+        call_id: str,
+        mode: str,
+    ) -> tuple[ToolMessage, Optional[ContextBundle]]:
+        """Validate submit_context args, build the bundle, and return both.
+
+        Returns a (ToolMessage, bundle) pair. On validation failure the
+        ToolMessage carries the rejection reason and bundle is None (interactive)
+        or a failed ContextBundle (autonomous).
+        """
+        requirements = (args.get("requirements") or "").strip()
+        repository_reference = (args.get("repository_reference") or "").strip()
+        development_guidelines = (args.get("development_guidelines") or "").strip()
+        repo_source = (args.get("repo_source") or "").strip().lower()
+        repository_owner = (
+            (args.get("repository_owner") or "").strip()
+            or settings.coding_repository_owner
+            or ""
+        )
+
+        missing: list[str] = []
+        if not repository_reference:
+            missing.append("repository_reference")
+        if not development_guidelines:
+            missing.append("development_guidelines")
+        if repo_source == "github" and not repository_owner:
+            missing.append("repository_owner (required for GitHub)")
+
+        if missing:
+            reason = (
+                "submit_context rejected — missing required field(s): "
+                f"{', '.join(missing)}."
+            )
+            if mode == "autonomous":
+                logger.warning(f"Context collection failed: {reason}")
+                return (
+                    ToolMessage(content=reason, tool_call_id=call_id),
+                    ContextBundle(status="failed", failure_reason=reason),
+                )
+            else:
+                logger.info(f"submit_context rejected: {reason}")
+                return (
+                    ToolMessage(
+                        content=(
+                            f"{reason} Fetch the missing piece or "
+                            "call ask_user, then submit_context again."
+                        ),
+                        tool_call_id=call_id,
+                    ),
+                    None,
+                )
+
+        bundle = ContextBundle(
+            requirements=requirements,
+            repository_reference=repository_reference,
+            development_guidelines=development_guidelines,
+            confluence_design_details=(
+                args.get("confluence_design_details") or ""
+            ).strip(),
+            repo_source=repo_source,
+            repository_owner=repository_owner,
+            base_branch=(args.get("base_branch") or "").strip()
+            or settings.coding_base_branch,
+            git_issue_details=(args.get("git_issue_details") or "").strip(),
+            status="complete",
+        )
+        logger.info(
+            "Context collected: repo="
+            f"{bundle.repository_reference or '(none)'}, "
+            f"guidelines={len(bundle.development_guidelines)} chars, "
+            f"design={len(bundle.confluence_design_details)} chars, "
+            f"git_issue={len(bundle.git_issue_details)} chars"
+        )
+        return (
+            ToolMessage(
+                content="Context captured — collection complete.",
+                tool_call_id=call_id,
+            ),
+            bundle,
+        )
+
     async def _tool_executor_node(self, state: CollectorState) -> dict:
         """Execute the supervisor's tool calls; intercept submit_context."""
         last_message = state["messages"][-1]
@@ -151,37 +234,13 @@ class ContextCollectorAgent:
             args = tc["args"]
             call_id = tc["id"]
 
-            # ── submit_context: build the bundle and end ─────────────
             if name == "submit_context":
-                bundle = ContextBundle(
-                    requirements=(args.get("requirements") or "").strip(),
-                    repository_reference=(
-                        args.get("repository_reference") or ""
-                    ).strip(),
-                    development_guidelines=(
-                        args.get("development_guidelines") or ""
-                    ).strip(),
-                    confluence_design_details=(
-                        args.get("confluence_design_details") or ""
-                    ).strip(),
-                    source_ref=(args.get("source_ref") or "").strip(),
-                    target_branch=(args.get("target_branch") or "").strip()
-                    or settings.coding_base_branch,
-                    status="complete",
+                msg, bundle = self._execute_submit_context(
+                    args, call_id, state.get("mode", "interactive")
                 )
-                state_update["context_bundle"] = bundle
-                results.append(
-                    ToolMessage(
-                        content="Context captured — collection complete.",
-                        tool_call_id=call_id,
-                    )
-                )
-                logger.info(
-                    "Context collected: repo="
-                    f"{bundle.repository_reference or '(none)'}, "
-                    f"guidelines={len(bundle.development_guidelines)} chars, "
-                    f"design={len(bundle.confluence_design_details)} chars"
-                )
+                results.append(msg)
+                if bundle is not None:
+                    state_update["context_bundle"] = bundle
                 continue
 
             matched = next((t for t in all_tools if t.name == name), None)

@@ -14,20 +14,28 @@ from typing import Optional
 
 @dataclass
 class ContextBundle:
-    """All context required to implement a change, gathered by the collector."""
+    """All context required to implement a change, gathered by the
+    collector."""
 
     # Core task text — the Jira/issue description, or the raw user prompt.
     requirements: str = ""
-    # The entry-point reference: "PROJ-123" / "owner/repo#42" / "" if free-text.
-    source_ref: str = ""
+    # The repository provider service - github or gitlab.
+    repo_source: str = ""
     # Confluence (or other) design-doc content. Empty when none was linked.
     confluence_design_details: str = ""
     # Contents of the mandatory development-guidelines file (e.g. robots.md).
     development_guidelines: str = ""
-    # Repository the coding agent should work in (URL / slug / project path).
+    # Repository name for github or project id for gitlab
     repository_reference: str = ""
+    # Owner/org for github; unused for gitlab project ids. Falls back to
+    # settings.coding_repository_owner.
+    repository_owner: str = ""
     # Branch to base work on. Defaults to settings.coding_base_branch.
-    target_branch: str = ""
+    base_branch: str = ""
+    # GitHub/GitLab issue details when an issue was linked on the Jira ticket.
+    # Format: "<issue label> - <issue title> - <issue description>".
+    # Empty when no issue link was present; fetch is skipped in that case.
+    git_issue_details: str = ""
     # "complete" when the bundle is usable, "failed" otherwise.
     status: str = "complete"
     # Human-readable reason when status == "failed".

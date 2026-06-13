@@ -39,7 +39,7 @@ class CodingPipeline:
 
     @staticmethod
     def _failure_response(
-        reason: str, mode: str, source_ref: str, thread_id: str
+        reason: str, mode: str, repo_source: str, thread_id: str
     ) -> dict:
         """Shape a terminal failure. Autonomous uses the parseable FAILURE
         format that ``SprintStartAgent`` keys on; interactive is conversational.
@@ -47,7 +47,7 @@ class CodingPipeline:
         if mode == "autonomous":
             response = (
                 f"FAILURE: {reason}\n"
-                f"REF: {source_ref or 'unknown'}\n"
+                f"REF: {repo_source or 'unknown'}\n"
                 "ATTEMPTED: context collection"
             )
         else:
@@ -109,22 +109,13 @@ class CodingPipeline:
                 if bundle and bundle.failure_reason
                 else "context collection did not produce a usable result"
             )
-            ref = bundle.source_ref if bundle else ""
+            ref = bundle.repo_source if bundle else ""
             logger.warning(f"Context collection failed: {reason}")
             return self._failure_response(reason, mode, ref, thread_id)
 
-        # Guidelines are mandatory — enforce even if the collector slipped.
-        if not bundle.development_guidelines.strip():
-            reason = (
-                "development guidelines are mandatory but were not collected "
-                f"(file: {settings.coding_guidelines_filename})"
-            )
-            logger.warning(reason)
-            return self._failure_response(reason, mode, bundle.source_ref, thread_id)
-
         # ── Step 3: run the coding agent to completion ────────────────
         logger.info(
-            f"Context ready (ref={bundle.source_ref or 'n/a'}, "
+            f"Context ready (ref={bundle.repo_source or 'n/a'}, "
             f"repo={bundle.repository_reference or 'n/a'}); "
             "starting code generation."
         )

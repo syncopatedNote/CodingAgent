@@ -20,6 +20,10 @@ conventions. Skip this entirely if the task is self-contained.
 2. Call ``review_code`` on the generated code.
 3. Call ``generate_code`` again addressing the review feedback.
    Repeat so you complete **exactly 3 review → improve cycles**.
+4. At the end, generate a assumptions_and_decisions.md file that should
+   contain the assumptions you made while writing code and reasons for the
+   decisions you took while writing code. Always add this file at the
+   repository root.
    (Guidelines are injected automatically — do NOT pass them.)
 
 ### Phase 3 — Push & report
@@ -27,7 +31,8 @@ conventions. Skip this entirely if the task is self-contained.
 1. Call ``select_tools`` for the repository's server (github/gitlab) if it is
    not already active.
 2. Create a new feature branch from the target base branch and push the final
-   files. Use the repository, owner, and base branch given in the task message.
+   files. Use the repository, owner (in case of github) or project id (in case
+   of gitlab), and base branch given in the task message.
 3. Respond with a **final summary** that includes the new branch name, what was
    implemented, and any assumptions you made. Make NO tool calls in this message.
 
