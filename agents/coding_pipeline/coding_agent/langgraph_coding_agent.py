@@ -26,6 +26,7 @@ The supervisor has access to:
   read-only repository searches and the final branch push.
 """
 
+import re
 import uuid
 from typing import Any, Dict, Optional, TypedDict, Annotated
 
@@ -42,7 +43,6 @@ from langgraph.graph.message import add_messages
 
 from framework_base.llm_base import LLMFactory
 from framework_base.mcp_servers.multi_server_mcp_client import (
-    multi_server_mcp_client,
     loaded_server_names,
 )
 from logger import setup_logger
@@ -61,6 +61,7 @@ from ..common_helpers import (
 )
 from ..collector_agent.context_bundle import ContextBundle
 from .custom_tools import generate_code, review_code, select_tools
+from .repo_mcp_helpers import fetch_existing_code, load_server_tools_cached
 
 logger = setup_logger(__name__)
 
@@ -75,6 +76,12 @@ class CodingTaskState(TypedDict):
     mode: str  # "interactive" | "autonomous"
     active_mcp_server: str  # name of the currently active MCP server, "" if none
     coding_guidelines: str  # seeded from the bundle, injected into gen/review
+    # Repository coordinates seeded from the bundle. The executor uses these to
+    # fetch existing file contents (read-before-write) without the LLM's help.
+    repo_source: str  # "github" | "gitlab"
+    repo_owner: str
+    repo_reference: str  # repo name (github) or project id (gitlab)
+    repo_base_branch: str
 
 
 # Phrases that signal the LLM is narrating intent rather than acting.
@@ -105,19 +112,22 @@ def _render_task(bundle: ContextBundle) -> str:
         or "(configured owner)"
     )
     design = bundle.confluence_design_details.strip() or "(none provided)"
+    git_issue = bundle.git_issue_details.strip() or "(none provided)"
     base_branch = bundle.base_branch or settings.coding_base_branch
     return (
         "Implement the following change. All context has already been "
-        "gathered for you — do NOT ask for more; do optional read-only "
-        "repository searches only if you need to understand structure.\n\n"
+        "gathered for you — do NOT ask for more.\n\n"
         f"REPOSITORY PROVIDER: {bundle.repo_source or '(n/a)'}\n"
         f"REPOSITORY: {bundle.repository_reference or '(n/a)'}\n"
         f"REPOSITORY OWNER: {owner}\n"
-        f"TARGET BASE BRANCH: {base_branch}\n\n"
+        f"TARGET BASE BRANCH (branch FROM this): {base_branch}\n\n"
         f"REQUIREMENTS:\n{bundle.requirements}\n\n"
+        f"LINKED ISSUE DETAILS:\n{git_issue}\n\n"
         f"DESIGN DETAILS:\n{design}\n\n"
         "Development guidelines are already loaded and are applied "
-        "automatically to every generate_code and review_code call."
+        "automatically to every generate_code and review_code call. The "
+        "current contents of any existing file you target are injected "
+        "automatically — do NOT fetch a file before editing it."
     )
 
 
@@ -164,24 +174,7 @@ class LangGraphCodingAgent:
 
     async def _load_server_tools(self, server_name: str) -> list:
         """Return tools for *server_name*, loading from the MCP client once."""
-        if server_name in self._mcp_tools_by_server:
-            logger.debug(f"Using cached tools for MCP server '{server_name}'")
-            return self._mcp_tools_by_server[server_name]
-
-        try:
-            tools = await multi_server_mcp_client.get_tools(server_name=server_name)
-            self._mcp_tools_by_server[server_name] = tools
-            logger.info(
-                f"Loaded and cached {len(tools)} tools for MCP server "
-                f"'{server_name}': {[t.name for t in tools]}"
-            )
-            return tools
-        except Exception as exc:
-            logger.error(
-                f"Failed to load tools for MCP server '{server_name}': {exc}",
-                exc_info=True,
-            )
-            return []
+        return await load_server_tools_cached(server_name, self._mcp_tools_by_server)
 
     async def _supervisor_node(self, state: CodingTaskState) -> dict:
         """The hub: assess state and pick the next tool call."""
@@ -285,10 +278,37 @@ class LangGraphCodingAgent:
                     "guidelines": state.get("coding_guidelines", ""),
                 }
 
+            # Read-before-write: for generate_code on an existing file, fetch
+            # the real contents and force them into existing_code so the LLM
+            # edits the file instead of regenerating it from scratch.
+            if name == "generate_code":
+                existing = await self._fetch_existing_code(
+                    state, (args.get("target_path") or "").strip()
+                )
+                if existing is not None:
+                    args = {**args, "existing_code": existing}
+
             content = await execute_tool_with_retry(matched, args)
             results.append(ToolMessage(content=content, tool_call_id=call_id))
 
         return state_update
+
+    async def _fetch_existing_code(
+        self, state: CodingTaskState, target_path: str
+    ) -> Optional[str]:
+        """Fetch current contents of *target_path* from the repo, or None.
+
+        Thin wrapper over :func:`fetch_existing_code` using this agent's repo
+        coordinates and per-server tool cache.
+        """
+        return await fetch_existing_code(
+            self._mcp_tools_by_server,
+            provider=state.get("repo_source", ""),
+            owner=state.get("repo_owner", ""),
+            repo_reference=state.get("repo_reference", ""),
+            base_branch=state.get("repo_base_branch", ""),
+            target_path=target_path,
+        )
 
     @staticmethod
     def _route_after_supervisor(state: CodingTaskState) -> str:
@@ -349,13 +369,30 @@ class LangGraphCodingAgent:
             "recursion_limit": 20,
         }
 
+        # Resolve repo coordinates from the bundle (with settings fallbacks).
+        provider = (bundle.repo_source or "").strip().lower()
+        owner = bundle.repository_owner or settings.coding_repository_owner or ""
+        repo_reference = bundle.repository_reference
+        base_branch = bundle.base_branch or settings.coding_base_branch
+
         try:
+            # Pre-load the repo server's tools so the executor can fetch
+            # existing files (read-before-write) before generation — independent
+            # of when the LLM first calls select_tools. Branch creation and
+            # pushing are driven by the supervisor LLM itself in Phase 4.
+            if provider:
+                await self._load_server_tools(provider)
+
             result = await self.graph.ainvoke(
                 {
                     "messages": [HumanMessage(content=_render_task(bundle))],
                     "mode": mode,
-                    "active_mcp_server": "",
+                    "active_mcp_server": provider,
                     "coding_guidelines": bundle.development_guidelines,
+                    "repo_source": provider,
+                    "repo_owner": owner,
+                    "repo_reference": repo_reference,
+                    "repo_base_branch": base_branch,
                 },
                 config,
             )

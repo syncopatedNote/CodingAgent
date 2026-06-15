@@ -22,74 +22,32 @@ A multi-agent AI assistant (called **Cortex**) built on FastAPI + LangGraph:
 
 ---
 
-## 2. Repository structure
+## 2. Discovering repository structure
 
-```
-Coding_agent/
-├── main.py                    # Supervisor API entrypoint (FastAPI app)
-├── settings.py                # ALL env vars via pydantic-settings (single source)
-│
-├── routes/                    # API route handlers — THIN wrappers only
-│   ├── supervisor_routes.py   # /api/supervisor/* (AG-UI)
-│   ├── knowledge_base_routes.py
-│   ├── documents_routes.py
-│   ├── sprint_routes.py       # /api/sprint/webhook/jira
-│   └── mcp_routes.py
-│
-├── agents/                    # Business logic for each agent (no HTTP code)
-│   ├── prompts/               # ALL prompts — one SUBDIR per agent, one MODULE per prompt
-│   │   ├── coding_supervisor/ # autonomous.py, generate_code.py, review_code.py, ...
-│   │   ├── context_collector/ # autonomous.py, nudge.py, system.py
-│   │   ├── general_chat/
-│   │   ├── kb_search/
-│   │   ├── main_supervisor/
-│   │   ├── question_enhancer/
-│   │   └── search/
-│   ├── coding_pipeline/       # Context collector → coding agent pipeline
-│   │   ├── coding_pipeline.py # CodingPipeline — chains collector → coding agent
-│   │   ├── common_helpers.py  # Shared prune / tool-retry / llm-retry functions
-│   │   ├── coding_agent/      # generate → review → push agent
-│   │   │   ├── langgraph_coding_agent.py
-│   │   │   ├── custom_tools.py            # generate_code, review_code, select_tools
-│   │   │   └── coding_llm_singleton.py    # Module-level codegen LLM (temp=0.3)
-│   │   └── collector_agent/   # Gathers context into a ContextBundle
-│   │       ├── context_collector_agent.py
-│   │       ├── context_bundle.py          # ContextBundle dataclass (the hand-off)
-│   │       ├── collector_tools.py         # ask_user + submit_context
-│   │       ├── mcp_fetch.py
-│   │       ├── jira_collector.py
-│   │       ├── confluence_collector.py
-│   │       ├── gitlab_collector.py
-│   │       └── github_collector.py
-│   ├── models/                # Pydantic response models
-│   ├── supervisor_agent.py    # LangGraph state machine — classify + route
-│   ├── search_agent.py
-│   ├── kb_search_agent.py
-│   ├── sprint_start_agent.py
-│   ├── general_chat_agent.py
-│   └── question_enhancer_agent.py
-│
-├── framework_base/            # Shared infrastructure (factories + registries)
-│   ├── llm_base.py            # LLMFactory — the ONLY way to build an LLM
-│   ├── llm_providers/         # ONE module per LLM provider
-│   │   ├── anthropic_provider.py   azure_provider.py   bedrock_provider.py
-│   │   ├── gcp_provider.py         litellm_provider.py ollama_provider.py
-│   │   ├── openai_provider.py      openrouter_provider.py
-│   ├── reranker.py            # RerankerFactory — create_reranker()
-│   ├── vector_store.py        # get_vector_store() — PGVector (sync + async modes)
-│   ├── doc_store.py           # get_document_store() — PostgresDocStore
-│   └── mcp_servers/
-│       ├── registry.py        # MCPServerRegistry — registration + discovery
-│       ├── base_server.py     # MCPServerConfig base class
-│       ├── multi_server_mcp_client.py
-│       └── servers/           # ONE module per MCP server
-│           ├── atlassian.py   context7.py   github.py   gitlab.py
-│
-├── ag_ui_middleware/          # AG-UI protocol adapter (event emission)
-├── RAG/                       # RAG service — separate FastAPI app + Temporal worker
-│   └── prompts/               # RAG prompts live HERE, not under agents/prompts
-└── Agent_UI/                  # Next.js frontend
-```
+Do **not** rely on a hand-maintained directory listing — it goes stale. When
+you need to understand where code lives, discover the structure at runtime from
+the repository itself, which is always current:
+
+- Call your provider's **tree** tool to map the repo in one shot
+  (`get_repository_tree` for GitHub, `list_repository_tree` for GitLab), with
+  `recursive=true` and an optional path filter.
+- Call the **read** tool (`get_file_contents` on both providers) to read a
+  specific file or browse a folder.
+
+The high-level packages you'll work within:
+
+- `routes/` — thin API handlers (no business logic).
+- `agents/` — one module/class per agent; `agents/prompts/<agent>/` holds that
+  agent's prompts; `agents/coding_pipeline/` holds the collector → coding-agent
+  pipeline; `agents/models/` holds Pydantic response models.
+- `framework_base/` — shared factories and registries (LLM, reranker, vector
+  store, doc store, MCP servers).
+- `RAG/` — the separate RAG service; its prompts live in `RAG/prompts/`.
+- `ag_ui_middleware/` — AG-UI streaming glue.
+- `settings.py` — every env var, in one `pydantic-settings` class.
+
+§5 below is the authoritative rule for *where new code goes*; use the live tree
+to confirm exact existing paths.
 
 ---
 
@@ -102,11 +60,17 @@ Coding_agent/
 - **Coding pipeline flow:** `CodingPipeline.run()` chains two agents:
   1. `ContextCollectorAgent` — gathers requirements/design/guidelines into a
      `ContextBundle`. **Only this agent may interrupt** (to ask the user).
-  2. `LangGraphCodingAgent` — consumes the bundle and runs a pure
-     **generate → review → push** loop with no further context gathering.
-  Both use the same **supervisor → tools → supervisor → … → END** hub-and-spoke
-  graph. The coding agent must call `select_tools("github"/"gitlab")` before
-  using that server's MCP tools.
+  2. `LangGraphCodingAgent` — consumes the bundle and runs:
+     **map repo (tree) → plan per file → per-file [generate → review →
+     improve ×3] → push to the work branch**. At `run()` it pre-loads the repo
+     server's tools and creates a unique work branch (`cortex/<id>`) so every
+     push lands on one branch. The executor enforces two invariants the LLM
+     cannot bypass: it injects the **real current contents** of an existing
+     target file as `existing_code` before each `generate_code` (read before
+     write — never regenerate a file blind), and it forces every file-write
+     onto the run's work branch.
+  Both agents use the same **supervisor → tools → supervisor → … → END**
+  hub-and-spoke graph.
 - **Sprint flow:** Jira webhook → fetch open tickets → run `CodingPipeline` in
   `autonomous` mode per ticket (no human prompts; a blocked ticket returns a
   parseable `FAILURE:` report).
@@ -151,6 +115,14 @@ llm = LLMFactory.create_llm(
 2. Register it in `framework_base/mcp_servers/registry.py`'s
    `_auto_register_servers()`.
 3. Add URL and enable-flag env vars to `settings.py`.
+
+### Add a new repository provider to the coding agent
+The coding agent fetches existing files and creates the work branch
+deterministically, so it needs the provider's tool names mapped:
+1. Add an entry to `_PROVIDER_TOOLS` in
+   `agents/coding_pipeline/coding_agent/langgraph_coding_agent.py` with the
+   provider's `tree`, `read`, and `branch` tool names.
+2. The collector must set `ContextBundle.repo_source` to the new provider key.
 
 ### Reranker / vector store / doc store
 - `RerankerFactory.create_reranker()` (`framework_base/reranker.py`) returns a
@@ -198,9 +170,15 @@ Import directly: `from agents.prompts.coding_supervisor.review_code import REVIE
 | API route handlers (thin) | `routes/` |
 | AG-UI event/streaming glue | `ag_ui_middleware/` |
 | Env var declarations | `settings.py` |
+| Coding-agent provider tool map / fresh-write exclusions | `_PROVIDER_TOOLS` / `_FRESH_WRITE_PATHS` in `langgraph_coding_agent.py` |
 
 Route handlers stay thin — push all logic down into an agent or a
 `framework_base` helper.
+
+Read-before-write enforcement and work-branch enforcement live in
+`_tool_executor_node` of `langgraph_coding_agent.py`. A file that must always
+be written fresh (never have remote contents injected) goes in
+`_FRESH_WRITE_PATHS`.
 
 ---
 

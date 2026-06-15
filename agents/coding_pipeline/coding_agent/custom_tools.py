@@ -19,25 +19,33 @@ logger = setup_logger(__name__)
 
 @tool
 async def generate_code(
+    target_path: str,
     requirements: str,
     context: str,
     existing_code: str = "",
     feedback: str = "",
     guidelines: str = "",
 ) -> str:
-    """Generate or improve production-ready code.
+    """Generate or improve production-ready code for ONE file.
 
-    For the first generation pass supply ``requirements`` and ``context``.
-    For subsequent reflection/improvement cycles also supply
-    ``existing_code`` and the ``feedback`` to address.
+    Each call targets a single file given by ``target_path``. For the first
+    generation pass supply ``requirements`` and ``context``. For subsequent
+    reflection/improvement cycles also supply the ``feedback`` to address.
+
+    The current contents of ``target_path`` (if the file already exists on the
+    base branch) are fetched and injected as ``existing_code`` automatically —
+    do NOT fetch the file yourself and do NOT pass ``existing_code`` manually.
+    For a brand-new file nothing is injected and you generate it from scratch.
 
     Coding guidelines are injected automatically from stored state —
     do NOT pass them manually.
 
     Args:
-        requirements: What needs to be implemented.
-        context: Repository structure, existing code patterns, etc.
-        existing_code: Previously generated code to improve.
+        target_path: Path of the file to create or modify, relative to the
+            repository root (e.g. "agents/supervisor_agent.py").
+        requirements: What needs to be implemented in THIS file.
+        context: Why the change is needed, related components, conventions.
+        existing_code: Injected automatically — leave unset.
         feedback: Review feedback to address.
     """
     action = "Generate" if not existing_code else "Improve"
@@ -54,11 +62,12 @@ async def generate_code(
 
     prompt = GENERATE_CODE_PROMPT.format(
         action=action,
+        target_path=target_path or "(unspecified)",
         requirements=requirements,
         context=context,
         extra=extra,
         feedback_instruction=(
-            "5. Addresses every review-feedback point" if feedback else ""
+            "6. Addresses every review-feedback point" if feedback else ""
         ),
     )
     messages = []

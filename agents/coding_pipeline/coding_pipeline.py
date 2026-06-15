@@ -26,6 +26,7 @@ from logger import setup_logger
 from settings import settings
 from .collector_agent import ContextCollectorAgent, ContextBundle
 from .coding_agent.langgraph_coding_agent import LangGraphCodingAgent
+from .coding_agent.deterministic_coding_agent import DeterministicCodingAgent
 
 logger = setup_logger(__name__)
 
@@ -35,7 +36,16 @@ class CodingPipeline:
 
     def __init__(self) -> None:
         self.collector = ContextCollectorAgent()
-        self.coding_agent = LangGraphCodingAgent()
+        # Select the coding agent by flag. Both expose the same
+        # run(bundle, mode=...) contract, so nothing else in the pipeline
+        # changes. "deterministic" uses the explicit per-file graph; anything
+        # else (default "supervisor") uses the improvised hub-and-spoke agent.
+        if settings.coding_agent_mode.strip().lower() == "deterministic":
+            logger.info("CodingPipeline using DeterministicCodingAgent")
+            self.coding_agent = DeterministicCodingAgent()
+        else:
+            logger.info("CodingPipeline using LangGraphCodingAgent (supervisor)")
+            self.coding_agent = LangGraphCodingAgent()
 
     @staticmethod
     def _failure_response(

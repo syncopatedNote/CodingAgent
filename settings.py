@@ -101,6 +101,15 @@ class Settings(BaseSettings):
     coding_repository_owner: Optional[str] = Field(
         default=None, alias="CODING_REPOSITORY_OWNER"
     )
+    # Which coding agent the pipeline uses: "supervisor" (the improvised
+    # hub-and-spoke LangGraphCodingAgent) or "deterministic" (the explicit
+    # explore → plan → per-file generate/review → push DeterministicCodingAgent).
+    coding_agent_mode: str = Field(default="supervisor", alias="CODING_AGENT_MODE")
+    # Max generate→review cycles per file in the deterministic agent. The loop
+    # exits early when the reviewer returns approved=true, so this is a ceiling,
+    # not a fixed count. On hitting the ceiling the file is staged with a
+    # warning carrying any unresolved blocking issues.
+    coding_max_review_cycles: int = Field(default=3, alias="CODING_MAX_REVIEW_CYCLES")
 
     class Config:
         env_file = ".env"

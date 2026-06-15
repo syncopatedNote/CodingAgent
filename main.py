@@ -28,6 +28,7 @@ from routes.knowledge_base_routes import (
     router as kb_router,
     initialize_kb_search_agent,
 )
+from routes.coding_test_routes import router as coding_test_router
 
 logger = setup_logger(__name__)
 
@@ -82,6 +83,7 @@ app.include_router(supervisor_router)
 app.include_router(documents_router)
 app.include_router(kb_router)
 app.include_router(sprint_router)
+app.include_router(coding_test_router)
 
 
 # ==================== API Endpoints ====================
