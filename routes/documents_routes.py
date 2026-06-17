@@ -2,7 +2,7 @@
 """
 Document management routes for the RAG knowledge base.
 
-Looks up and deletes chunks in the Chroma 'uploads' collection by
+Looks up and deletes chunks in the pgvector 'uploads' collection by
 document_name. All metadata-key constants come from RAG.constants — the
 single source of truth shared with the ingest pipeline.
 """
@@ -10,12 +10,13 @@ single source of truth shared with the ingest pipeline.
 from collections import defaultdict
 from typing import List, Optional
 
+import psycopg
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from framework_base.doc_store import get_document_store
-from framework_base.vector_store import get_vector_store
 from logger import setup_logger
+from settings import settings
 from RAG.constants import COLLECTION_NAME, DOC_NAME_KEY, ID_KEY, INGEST_DATE_KEY
 
 logger = setup_logger(__name__)
@@ -25,7 +26,7 @@ router = APIRouter(prefix="/api/documents", tags=["Documents"])
 
 class DocumentSummary(BaseModel):
     document_name: str
-    chunk_count: int = Field(..., description="Number of chunks in Chroma")
+    chunk_count: int = Field(..., description="Number of chunks in the vector store")
     ingestion_date: Optional[str] = Field(
         None, description="Latest ISO timestamp when this document was ingested"
     )
@@ -38,8 +39,8 @@ class DocumentListResponse(BaseModel):
 
 class DeleteResponse(BaseModel):
     document_name: str
-    chroma_deleted: int
-    redis_deleted: int
+    vectors_deleted: int
+    docstore_deleted: int
 
 
 def _summarise_metadatas(metadatas: list) -> List[DocumentSummary]:
@@ -86,27 +87,47 @@ async def list_documents(
     ),
 ) -> DocumentListResponse:
     """Return a summary (chunk count + latest ingestion date) for each unique
-    document in the Chroma knowledge base.
+    document in the pgvector knowledge base.
 
-    - **With `document_name`**: Chroma applies a server-side `where` filter —
+    - **With `document_name`**: a server-side WHERE filter is applied —
       only chunks for that document are returned.
-    - **Without `document_name`**: ⚠️ All chunk metadata is fetched from Chroma
-      and aggregated in Python. Avoid on large collections.
+    - **Without `document_name`**: ⚠️ All chunk metadata is fetched and
+      aggregated in Python. Avoid on large collections.
     """
     try:
-        vectorstore = get_vector_store(collection_name=COLLECTION_NAME)
-        if document_name:
-            result = vectorstore._collection.get(
-                where={DOC_NAME_KEY: document_name},
-                include=["metadatas"],
-            )
-        else:
-            result = vectorstore._collection.get(include=["metadatas"])
+        async with await psycopg.AsyncConnection.connect(settings.postgres_dsn) as conn:
+            async with conn.cursor() as cur:
+                if document_name:
+                    await cur.execute(
+                        """
+                        SELECT e.cmetadata
+                        FROM langchain_pg_embedding e
+                        JOIN langchain_pg_collection c
+                          ON e.collection_id = c.uuid
+                        WHERE c.name = %s
+                          AND e.cmetadata->>'document_name' = %s
+                        """,
+                        (COLLECTION_NAME, document_name),
+                    )
+                else:
+                    await cur.execute(
+                        """
+                        SELECT e.cmetadata
+                        FROM langchain_pg_embedding e
+                        JOIN langchain_pg_collection c
+                          ON e.collection_id = c.uuid
+                        WHERE c.name = %s
+                        """,
+                        (COLLECTION_NAME,),
+                    )
+                rows = await cur.fetchall()
     except Exception:
-        logger.exception("Failed to query Chroma (document_name=%s)", document_name)
+        logger.exception(
+            "Failed to query vector store (document_name=%s)", document_name
+        )
         raise HTTPException(status_code=502, detail="Vector store unavailable")
 
-    metadatas = result.get("metadatas") or []
+    metadatas = [row[0] for row in rows]
     if not metadatas:
         if document_name:
             raise HTTPException(
@@ -121,69 +142,69 @@ async def list_documents(
 
 @router.delete("/{document_name:path}", response_model=DeleteResponse)
 async def delete_document(document_name: str) -> DeleteResponse:
-    """Delete every chunk belonging to `document_name` from both Chroma and
-    Redis. Returns counts of records removed from each store."""
+    """Delete every chunk belonging to `document_name` from both the vector
+    store and the docstore. Returns counts of records removed from each."""
     document_name = document_name.strip("\"'")
+
     try:
-        vectorstore = get_vector_store(collection_name=COLLECTION_NAME)
-        # Fetch matching chunks first so we know which Redis keys to delete
-        matches = vectorstore._collection.get(
-            where={DOC_NAME_KEY: document_name},
-            include=["metadatas"],
-        )
+        async with await psycopg.AsyncConnection.connect(settings.postgres_dsn) as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    DELETE FROM langchain_pg_embedding e
+                    USING langchain_pg_collection c
+                    WHERE e.collection_id = c.uuid
+                      AND c.name = %s
+                      AND e.cmetadata->>'document_name' = %s
+                    RETURNING e.cmetadata->>'doc_id'
+                    """,
+                    (COLLECTION_NAME, document_name),
+                )
+                rows = await cur.fetchall()
     except Exception:
-        logger.exception("Failed to query Chroma for document_name=%s", document_name)
+        logger.exception(
+            "Failed to delete from vector store for document_name=%s", document_name
+        )
         raise HTTPException(status_code=502, detail="Vector store unavailable")
 
-    chroma_ids = matches.get("ids") or []
-    metadatas = matches.get("metadatas") or []
-
-    if not chroma_ids:
+    if not rows:
         raise HTTPException(
             status_code=404,
             detail=f"No chunks found for document '{document_name}'",
         )
 
-    doc_ids = [m.get(ID_KEY) for m in metadatas if m and m.get(ID_KEY)]
+    vectors_deleted = len(rows)
+    doc_ids = [r[0] for r in rows if r[0]]
 
-    # Delete from Chroma by Chroma's internal ids — exact match, no race
-    # with the `where` filter if another ingest is happening concurrently.
-    try:
-        vectorstore._collection.delete(ids=chroma_ids)
-    except Exception:
-        logger.exception("Chroma delete failed for document_name=%s", document_name)
-        raise HTTPException(status_code=502, detail="Vector store delete failed")
-
-    # Delete the matching original chunks from Redis
-    redis_deleted = 0
+    docstore_deleted = 0
     if doc_ids:
         try:
             docstore = get_document_store()
             docstore.mdelete(doc_ids)
-            redis_deleted = len(doc_ids)
+            docstore_deleted = len(doc_ids)
         except Exception:
             logger.exception(
-                "Redis delete failed for document_name=%s — Chroma chunks removed "
-                "but %d Redis keys may be orphaned",
+                "Docstore delete failed for document_name=%s — vector chunks removed "
+                "but %d docstore keys may be orphaned",
                 document_name,
                 len(doc_ids),
             )
             raise HTTPException(
                 status_code=500,
                 detail=(
-                    f"Chroma cleared ({len(chroma_ids)} chunks) but Redis "
+                    f"Vector store cleared ({vectors_deleted} chunks) but docstore "
                     f"delete failed; {len(doc_ids)} keys may be orphaned"
                 ),
             )
 
     logger.info(
-        "Deleted document '%s': %d Chroma chunks, %d Redis keys",
+        "Deleted document '%s': %d vector chunks, %d docstore keys",
         document_name,
-        len(chroma_ids),
-        redis_deleted,
+        vectors_deleted,
+        docstore_deleted,
     )
     return DeleteResponse(
         document_name=document_name,
-        chroma_deleted=len(chroma_ids),
-        redis_deleted=redis_deleted,
+        vectors_deleted=vectors_deleted,
+        docstore_deleted=docstore_deleted,
     )

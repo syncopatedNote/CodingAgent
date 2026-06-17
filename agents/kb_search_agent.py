@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Knowledge Base Search Agent
-Answers user queries by retrieving relevant context from the ChromaDB
+Answers user queries by retrieving relevant context from the pgvector
 knowledge base (RAG) and grounding the LLM response in those documents.
 """
 
@@ -106,7 +106,9 @@ class KnowledgeBaseSearchAgent:
         is found or the store is unavailable.
         """
         try:
-            vectorstore = get_vector_store(collection_name=_RAG_COLLECTION)
+            vectorstore = get_vector_store(
+                collection_name=_RAG_COLLECTION, async_mode=True
+            )
             docstore = _DocStoreAdapter(get_document_store())
             base_retriever = MultiVectorRetriever(
                 vectorstore=vectorstore,

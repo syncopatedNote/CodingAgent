@@ -39,7 +39,12 @@ def _build_client_config() -> dict:
 
 
 # Initialize the multi-server MCP client with discovered and enabled servers
-multi_server_mcp_client = MultiServerMCPClient(_build_client_config())
+_client_config = _build_client_config()
+multi_server_mcp_client = MultiServerMCPClient(_client_config)
+
+# Names of every server the client was initialised with — use this instead of
+# querying the registry a second time.
+loaded_server_names: list[str] = sorted(_client_config.keys())
 
 
 async def get_read_only_tools(server_name: str = None):

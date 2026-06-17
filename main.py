@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from logger import setup_logger
 from routes.documents_routes import router as documents_router
 from routes.mcp_routes import router as mcp_router
+from routes.sprint_routes import router as sprint_router
 from routes.supervisor_routes import (
     router as supervisor_router,
     initialize_agent,
@@ -27,6 +28,7 @@ from routes.knowledge_base_routes import (
     router as kb_router,
     initialize_kb_search_agent,
 )
+from routes.coding_test_routes import router as coding_test_router
 
 logger = setup_logger(__name__)
 
@@ -80,6 +82,8 @@ app.include_router(mcp_router)
 app.include_router(supervisor_router)
 app.include_router(documents_router)
 app.include_router(kb_router)
+app.include_router(sprint_router)
+app.include_router(coding_test_router)
 
 
 # ==================== API Endpoints ====================
@@ -145,6 +149,7 @@ async def root():
             "list_documents": "/api/documents",
             "delete_document": "/api/documents/{document_name}",
             "kb_search_agent": "/api/knowledge-base/agent",
+            "sprint_webhook": "/api/sprint/webhook/jira",
         },
     }
 

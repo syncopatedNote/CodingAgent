@@ -1,3 +1,5 @@
+from typing import Optional
+
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
@@ -59,12 +61,8 @@ class Settings(BaseSettings):
         default="http://localhost:11434", alias="OLLAMA_BASE_URL"
     )
 
-    # PostgreSQL docstore
+    # PostgreSQL docstore + pgvector store
     postgres_dsn: str = Field(alias="POSTGRES_DSN")
-
-    # Chroma (vector DB) Configuration (hosted service only)
-    chroma_server_host: str = Field(default="", alias="CHROMA_SERVER_HOST")
-    chroma_server_http_port: int = Field(default=0, alias="CHROMA_SERVER_HTTP_PORT")
 
     # Embedding model configuration (local HuggingFace)
     hf_embed_model: str = Field(
@@ -83,6 +81,35 @@ class Settings(BaseSettings):
     mcp_gitlab_enabled: bool = Field(default=True, alias="MCP_GITLAB_ENABLED")
     mcp_github_enabled: bool = Field(default=True, alias="MCP_GITHUB_ENABLED")
     mcp_context7_enabled: bool = Field(default=True, alias="MCP_CONTEXT7_ENABLED")
+
+    # Sprint Start Agent
+    jira_webhook_secret: str = Field(default="", alias="JIRA_WEBHOOK_SECRET")
+    sprint_start_max_concurrent: int = Field(
+        default=1, alias="SPRINT_START_MAX_CONCURRENT"
+    )
+
+    # Coding pipeline (context collector + coding agent)
+    # Branch the coding agent bases its work on, and the branch the development
+    # guidelines file is read from.
+    coding_base_branch: str = Field(default="main", alias="CODING_BASE_BRANCH")
+    # Filename of the mandatory development-guidelines file in the repo root.
+    coding_guidelines_filename: str = Field(
+        default="robots.md", alias="CODING_GUIDELINES_FILENAME"
+    )
+    # Repository owner / org. Mandatory — GitHub MCP push tools fail without it.
+    # The pipeline refuses to run when this is unset.
+    coding_repository_owner: Optional[str] = Field(
+        default=None, alias="CODING_REPOSITORY_OWNER"
+    )
+    # Which coding agent the pipeline uses: "supervisor" (the improvised
+    # hub-and-spoke LangGraphCodingAgent) or "deterministic" (the explicit
+    # explore → plan → per-file generate/review → push DeterministicCodingAgent).
+    coding_agent_mode: str = Field(default="supervisor", alias="CODING_AGENT_MODE")
+    # Max generate→review cycles per file in the deterministic agent. The loop
+    # exits early when the reviewer returns approved=true, so this is a ceiling,
+    # not a fixed count. On hitting the ceiling the file is staged with a
+    # warning carrying any unresolved blocking issues.
+    coding_max_review_cycles: int = Field(default=3, alias="CODING_MAX_REVIEW_CYCLES")
 
     class Config:
         env_file = ".env"

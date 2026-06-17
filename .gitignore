@@ -23,6 +23,13 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# Local sample data
+jira_samples/
+
+# Claude
+.claude/
+CLAUDE.*
+
 # Virtual environments
 venv/
 env/
