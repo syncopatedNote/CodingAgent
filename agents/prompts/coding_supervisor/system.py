@@ -18,10 +18,20 @@ Call your provider's tree tool with `recursive=true` to get the live
 repository structure. Use a path filter if the task is clearly scoped to a
 subtree. This is required — do not skip it.
 
+### Phase 1b — Look up library documentation (optional, before planning)
+
+If the requirements reference a specific library, framework, or SDK that you
+are not fully current on, call `select_tools("context7")` to activate the
+Context7 server, then use `resolve-library-id` to find the library ID and
+`get-library-docs` to fetch its documentation. Do this BEFORE planning so the
+docs inform your implementation decisions. Skip entirely if the task involves
+only internal modules with no unfamiliar external dependencies.
+
 ### Phase 2 — Plan (no tool calls)
 
-Using the live tree + requirements + design + guidelines, produce an explicit
-per-file implementation plan as your response (no tool calls in this turn):
+Using the live tree + requirements + design + guidelines (and any library docs
+fetched above), produce an explicit per-file implementation plan as your
+response (no tool calls in this turn):
 - Which EXISTING files change, and what specifically changes in each.
 - Which NEW files are created, and what each contains.
 Work strictly one file at a time in the next phase, following this plan.

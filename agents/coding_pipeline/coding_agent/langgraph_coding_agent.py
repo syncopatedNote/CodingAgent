@@ -382,6 +382,9 @@ class LangGraphCodingAgent:
             # pushing are driven by the supervisor LLM itself in Phase 4.
             if provider:
                 await self._load_server_tools(provider)
+            # Pre-load Context7 so the LLM can call select_tools("context7")
+            # immediately without a round-trip to activate it first.
+            await self._load_server_tools("context7")
 
             result = await self.graph.ainvoke(
                 {

@@ -15,20 +15,15 @@ class GithubMcpServerConfig(MCPServerConfig):
         super().__init__(**data)
         self.name = "github"
         self.enabled = settings.mcp_github_enabled
-        self.description = "GitHub MCP server for repository\
-            and project management"
-        # Remote HTTP transport (GitHub's hosted MCP server)
-        self.http_url = "https://api.githubcopilot.com/mcp/"
-        self.command = None  # No local command needed
+        self.description = "GitHub MCP server for repository and project management"
+        self.http_url = settings.mcp_github_url
+        self.command = None
         self.args = []
         self.env = {}
 
     def get_active_server_config(self) -> Dict:
-        """
-        Get the remote GitHub MCP server configuration
-        """
+        """Get the GitHub MCP server configuration."""
         return {
             "url": self.http_url,
             "transport": "streamable_http",
-            "headers": {"Authorization": f"Bearer {settings.github_token}"},
         }
