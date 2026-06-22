@@ -80,6 +80,7 @@ class CollectorState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     mode: str  # "interactive" | "autonomous"
     context_bundle: Optional[ContextBundle]
+    collected_guidelines: str  # guidelines body stashed by the executor
 
 
 class ContextCollectorAgent:
@@ -127,8 +128,20 @@ class ContextCollectorAgent:
             else CONTEXT_COLLECTOR_SYSTEM_PROMPT
         )
 
+        # Stamp runtime config values into the system prompt so the model
+        # never needs to ask for information that is already configured.
+        config_note = (
+            f"\n\n## Pre-configured defaults (do NOT ask the user for these)\n"
+            f"- CODING_REPOSITORY_OWNER = \"{settings.coding_repository_owner or '(not set)'}\"\n"
+            f'- CODING_BASE_BRANCH = "{settings.coding_base_branch}"\n'
+            f'- CODING_GUIDELINES_FILENAME = "{settings.coding_guidelines_filename}"\n'
+            "These values are already available as defaults in the collector tools. "
+            "Use them directly — never call ask_user for repository_owner, base branch, "
+            "or guidelines filename."
+        )
+
         pruned = prune_tool_cycles(state["messages"])
-        messages = [SystemMessage(content=system_prompt)] + pruned
+        messages = [SystemMessage(content=system_prompt + config_note)] + pruned
         response = await invoke_llm_with_retry(llm_with_tools, messages)
         return {"messages": [response]}
 
@@ -137,6 +150,7 @@ class ContextCollectorAgent:
         args: dict,
         call_id: str,
         mode: str,
+        collected_guidelines: str = "",
     ) -> tuple[ToolMessage, Optional[ContextBundle]]:
         """Validate submit_context args, build the bundle, and return both.
 
@@ -146,7 +160,11 @@ class ContextCollectorAgent:
         """
         requirements = (args.get("requirements") or "").strip()
         repository_reference = (args.get("repository_reference") or "").strip()
-        development_guidelines = (args.get("development_guidelines") or "").strip()
+        # Prefer the guidelines body stashed in state by the executor
+        # (bypasses the LLM re-copying 12k+ chars through submit_context).
+        development_guidelines = (
+            collected_guidelines or (args.get("development_guidelines") or "").strip()
+        )
         repo_source = (args.get("repo_source") or "").strip().lower()
         repository_owner = (
             (args.get("repository_owner") or "").strip()
@@ -236,7 +254,10 @@ class ContextCollectorAgent:
 
             if name == "submit_context":
                 msg, bundle = self._execute_submit_context(
-                    args, call_id, state.get("mode", "interactive")
+                    args,
+                    call_id,
+                    state.get("mode", "interactive"),
+                    state.get("collected_guidelines", ""),
                 )
                 results.append(msg)
                 if bundle is not None:
@@ -258,7 +279,16 @@ class ContextCollectorAgent:
                 continue
 
             content = await execute_tool_with_retry(matched, args)
-            results.append(ToolMessage(content=content, tool_call_id=call_id))
+            if isinstance(content, dict) and content.get("__guidelines_payload__"):
+                state_update["collected_guidelines"] = content["content"]
+                results.append(
+                    ToolMessage(
+                        content=content["signal"],
+                        tool_call_id=call_id,
+                    )
+                )
+            else:
+                results.append(ToolMessage(content=content, tool_call_id=call_id))
 
         return state_update
 
@@ -346,6 +376,7 @@ class ContextCollectorAgent:
                         "messages": [HumanMessage(content=user_input)],
                         "mode": mode,
                         "context_bundle": None,
+                        "collected_guidelines": "",
                     },
                     config,
                 )

@@ -39,8 +39,15 @@ Concrete examples from this codebase:
       → tests/utils/test_time_utils.py
 
 If ANY test code is placed at the wrong path — flat in `tests/`, next to the
-source file, or in any other location — that is a BLOCKING issue. State the
-correct target path explicitly in your blocking_issues entry.
+source file, or in any other location — that is a BLOCKING issue. Your
+blocking_issues entry MUST state BOTH actions explicitly:
+  (a) REMOVE the test code from this file (name the specific functions or
+      classes to delete).
+  (b) The correct target path where those tests must live.
+Example: "REMOVE test functions `test_foo` and `test_bar` from this file;
+they belong in `tests/agents/my_module/test_my_file.py`."
+Stating only the target path is not sufficient — you must also demand the
+deletion from the current file.
 
 If a test file is required but missing entirely, that is also a BLOCKING issue.
 State what file should be created and at what path.

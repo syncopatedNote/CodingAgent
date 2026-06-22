@@ -28,7 +28,7 @@ async def github_collector(
     guidelines_file: str = "",
     branch: str = "",
     owner: str = "",
-) -> str:
+) -> str | dict:
     """Fetch a GitHub issue or the repository's development-guidelines file.
 
     Use this when the repository is hosted on GitHub. To fetch an issue (as the
@@ -104,7 +104,13 @@ async def github_collector(
             f"{repo_owner}/{repo}@{ref} is empty. The guidelines file is "
             "mandatory."
         )
-    return (
-        f"DEVELOPMENT GUIDELINES "
-        f"(github {repo_owner}/{repo}@{ref}/{filename}):\n{content}"
-    )
+    return {
+        "__guidelines_payload__": True,
+        "content": content,
+        "signal": (
+            f"✓ Development guidelines fetched from "
+            f"github {repo_owner}/{repo}@{ref}/{filename} "
+            f"({len(content)} chars) — stored for hand-off. "
+            "Proceed to the next step."
+        ),
+    }
