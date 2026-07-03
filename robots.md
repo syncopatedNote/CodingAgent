@@ -132,6 +132,13 @@ deterministically, so it needs the provider's tool names mapped:
   ingestion — mixing them causes greenlet errors.
 - `get_document_store(collection_name)` (`doc_store.py`) returns a
   `PostgresDocStore`; store plain JSONB dicts, not `Document` objects.
+- `get_semantic_cache()` (`framework_base/semantic_query_cache.py`) returns the
+  process-wide `SemanticQueryCache` — a pgvector-backed cache of KB-search
+  answers keyed by query embedding. Async `get`/`set` for KB search;
+  `sync_invalidate_by_document` for the sync ingest loaders; invalidation
+  never raises (TTL is the backstop). Configured by the `SEMANTIC_CACHE_*`
+  vars in `settings.py`. Never hand-roll SQL against `semantic_query_cache` —
+  go through this service.
 
 ### Settings
 All config lives in `settings.py` as a `pydantic-settings` `BaseSettings`.

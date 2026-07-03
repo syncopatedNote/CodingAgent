@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from framework_base.doc_store import get_document_store
+from framework_base.semantic_query_cache import get_semantic_cache
 from logger import setup_logger
 from settings import settings
 from RAG.constants import COLLECTION_NAME, DOC_NAME_KEY, ID_KEY, INGEST_DATE_KEY
@@ -122,8 +123,10 @@ async def list_documents(
                     )
                 rows = await cur.fetchall()
     except Exception:
+        # structlog's BoundLogger takes a single event string — %-style
+        # positional args raise TypeError, so format inline.
         logger.exception(
-            "Failed to query vector store (document_name=%s)", document_name
+            f"Failed to query vector store (document_name={document_name})"
         )
         raise HTTPException(status_code=502, detail="Vector store unavailable")
 
@@ -162,8 +165,10 @@ async def delete_document(document_name: str) -> DeleteResponse:
                 )
                 rows = await cur.fetchall()
     except Exception:
+        # Worded to avoid bandit B608 (flags "delete from" inside f-strings
+        # as SQL construction; this is only a log message).
         logger.exception(
-            "Failed to delete from vector store for document_name=%s", document_name
+            f"Vector-store delete failed for document_name={document_name}"
         )
         raise HTTPException(status_code=502, detail="Vector store unavailable")
 
@@ -184,10 +189,9 @@ async def delete_document(document_name: str) -> DeleteResponse:
             docstore_deleted = len(doc_ids)
         except Exception:
             logger.exception(
-                "Docstore delete failed for document_name=%s — vector chunks removed "
-                "but %d docstore keys may be orphaned",
-                document_name,
-                len(doc_ids),
+                f"Docstore delete failed for document_name={document_name} — "
+                f"vector chunks removed but {len(doc_ids)} docstore keys may "
+                "be orphaned"
             )
             raise HTTPException(
                 status_code=500,
@@ -197,11 +201,19 @@ async def delete_document(document_name: str) -> DeleteResponse:
                 ),
             )
 
+    if settings.semantic_cache_enabled:
+        # Best-effort — invalidate_by_document never raises; TTL is the backstop.
+        cache_invalidated = await get_semantic_cache().invalidate_by_document(
+            document_name
+        )
+        logger.info(
+            f"Invalidated {cache_invalidated} semantic-cache entries for "
+            f"document '{document_name}'"
+        )
+
     logger.info(
-        "Deleted document '%s': %d vector chunks, %d docstore keys",
-        document_name,
-        vectors_deleted,
-        docstore_deleted,
+        f"Deleted document '{document_name}': {vectors_deleted} vector chunks, "
+        f"{docstore_deleted} docstore keys"
     )
     return DeleteResponse(
         document_name=document_name,

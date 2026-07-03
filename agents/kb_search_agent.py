@@ -19,6 +19,7 @@ from agents.prompts.kb_search.search_prompts import (
 )
 from framework_base.llm_base import LLMFactory
 from framework_base.reranker import RerankerFactory
+from framework_base.semantic_query_cache import get_semantic_cache
 from framework_base.vector_store import get_vector_store
 from settings import settings
 from logger import setup_logger
@@ -90,7 +91,9 @@ class KnowledgeBaseSearchAgent:
             **llm_kwargs,
         )
 
-    async def _retrieve_rag_context(self, query: str) -> str:
+        self.cache = get_semantic_cache() if settings.semantic_cache_enabled else None
+
+    async def _retrieve_rag_context(self, query: str) -> tuple[str, list[str]]:
         """Retrieve and rerank relevant chunks from the knowledge base.
 
         Pipeline:
@@ -102,8 +105,10 @@ class KnowledgeBaseSearchAgent:
              configured reranker, which scores each (query, chunk) pair and
              returns the top_n most relevant chunks.
 
-        Returns a formatted context string, or an empty string when nothing
-        is found or the store is unavailable.
+        Returns a tuple of (formatted context string, ordered unique source
+        document names), or ("", []) when nothing is found or the store is
+        unavailable. Docs without a document_name in their metadata (e.g.
+        Confluence-ingested chunks) contribute context but no source name.
         """
         try:
             vectorstore = get_vector_store(
@@ -123,27 +128,31 @@ class KnowledgeBaseSearchAgent:
             docs = await retriever.ainvoke(query)
             if docs:
                 context_parts = []
+                source_doc_names: list[str] = []
                 for doc in docs:
-                    doc_name = doc.metadata.get("document_name", "unknown")
+                    doc_name = doc.metadata.get("document_name")
+                    if doc_name is not None and doc_name not in source_doc_names:
+                        source_doc_names.append(doc_name)
+                    label_name = doc_name if doc_name is not None else "unknown"
                     page = doc.metadata.get("page")
                     page_str = f", page {page + 1}" if page is not None else ""
                     if doc.metadata.get("type") == "table":
-                        label = f"[Table from {doc_name}{page_str}]"
+                        label = f"[Table from {label_name}{page_str}]"
                     else:
-                        label = f"[{doc_name}{page_str}]"
+                        label = f"[{label_name}{page_str}]"
                     context_parts.append(f"{label}:\n{doc.page_content}")
                 rag_context = "\n\n".join(context_parts)
                 logger.info(
                     f"Retrieved {len(docs)} document(s) from knowledge base"
                     " after reranking"
                 )
-                return rag_context
+                return rag_context, source_doc_names
         except Exception as rag_err:
             logger.warning(
                 f"Knowledge base query skipped ({rag_err}). "
                 "Proceeding without RAG context."
             )
-        return ""
+        return "", []
 
     def _build_prompt(self, query: str, rag_context: str) -> str:
         """Build the LLM prompt, injecting KB context when available."""
@@ -156,13 +165,28 @@ class KnowledgeBaseSearchAgent:
     async def search(self, query: str) -> str:
         """Search the knowledge base and return a grounded answer.
 
+        Checks the semantic cache first (when enabled): a hit returns the
+        cached answer with no retrieval or LLM call. Misses fall through to
+        the full RAG pipeline; grounded answers are written back to the
+        cache. No-context answers are never cached, and any cache failure
+        degrades to a normal uncached search.
+
         Args:
             query: The user's question or search query.
 
         Returns:
             The LLM-generated response grounded in retrieved documents.
         """
-        rag_context = await self._retrieve_rag_context(query)
+        if self.cache is not None:
+            cached_response = await self.cache.get(query)
+            if cached_response is not None:
+                return cached_response
+
+        rag_context, source_doc_names = await self._retrieve_rag_context(query)
         prompt = self._build_prompt(query, rag_context)
         response = await self.llm.ainvoke([HumanMessage(content=prompt)])
+
+        if self.cache is not None and source_doc_names:
+            await self.cache.set(query, response.content, source_doc_names)
+
         return response.content

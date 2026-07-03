@@ -86,6 +86,12 @@ services:
 
       # PostgreSQL docstore (used by MultiVectorRetriever in general chat)
       POSTGRES_DSN: ${POSTGRES_DSN}
+
+      # Semantic query cache (KB search)
+      SEMANTIC_CACHE_ENABLED: ${SEMANTIC_CACHE_ENABLED:-true}
+      SEMANTIC_CACHE_TTL_HOURS: ${SEMANTIC_CACHE_TTL_HOURS:-24}
+      SEMANTIC_CACHE_SIMILARITY_THRESHOLD: ${SEMANTIC_CACHE_SIMILARITY_THRESHOLD:-0.92}
+      SEMANTIC_CACHE_MAX_ENTRIES: ${SEMANTIC_CACHE_MAX_ENTRIES:-10000}
     volumes:
       - .:/app
     depends_on:
@@ -227,7 +233,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-app}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init-pgvector.sql:/docker-entrypoint-initdb.d/init-pgvector.sql:ro
+      # Init files run in name order, and only on first boot (empty volume).
+      # On existing deployments apply 02-semantic-cache.sql manually via psql.
+      - ./init-pgvector.sql:/docker-entrypoint-initdb.d/01-pgvector.sql:ro
+      - ./init-semantic-cache.sql:/docker-entrypoint-initdb.d/02-semantic-cache.sql:ro
     networks:
       - supervisor-network
     restart: unless-stopped
@@ -312,6 +321,8 @@ services:
       TEMPORAL_HOST: ${TEMPORAL_HOST:-temporal:7233}
       # PostgreSQL docstore
       POSTGRES_DSN: ${POSTGRES_DSN}
+      # Semantic cache invalidation on ingest completion
+      SEMANTIC_CACHE_ENABLED: ${SEMANTIC_CACHE_ENABLED:-true}
       # LLM (used by pdf_loader for chunk summarization via LiteLLM proxy)
       LLM_PROVIDER: ${LLM_PROVIDER:-litellm}
       LLM_MODEL_NAME: ${LLM_MODEL_NAME:-gpt-4o-mini}

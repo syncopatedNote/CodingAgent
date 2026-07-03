@@ -2,9 +2,11 @@ import uuid
 from datetime import datetime, timezone
 
 from framework_base.doc_store import get_document_store
+from framework_base.semantic_query_cache import get_semantic_cache
 from framework_base.vector_store import get_vector_store
 from langchain.retrievers.multi_vector import MultiVectorRetriever
 from logger import setup_logger
+from settings import settings
 from ..constants import COLLECTION_NAME, DOC_NAME_KEY, ID_KEY, INGEST_DATE_KEY
 from ..utils import split_text
 from .chunk_ingestor import (
@@ -100,6 +102,16 @@ def ingest_text_file(file_path: str, document_name: str) -> dict:
         f"Stored {len(vector_docs)} vectors ({len(text_chunks)} chunks × 3) "
         f"for {document_name}"
     )
+
+    # Invalidate at completion, not start: during a long ingest queries still
+    # retrieve the old chunks, so entries cached mid-run would go stale the
+    # moment the new content lands. sync_invalidate_by_document never raises.
+    if settings.semantic_cache_enabled:
+        invalidated = get_semantic_cache().sync_invalidate_by_document(document_name)
+        logger.info(
+            f"Invalidated {invalidated} semantic-cache entries after "
+            f"ingesting '{document_name}'"
+        )
 
     return {
         "status": "ingested",

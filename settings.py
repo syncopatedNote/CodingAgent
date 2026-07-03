@@ -111,6 +111,19 @@ class Settings(BaseSettings):
     # warning carrying any unresolved blocking issues.
     coding_max_review_cycles: int = Field(default=3, alias="CODING_MAX_REVIEW_CYCLES")
 
+    # Semantic query cache (KB search answers, pgvector-backed)
+    semantic_cache_enabled: bool = Field(default=True, alias="SEMANTIC_CACHE_ENABLED")
+    semantic_cache_ttl_hours: int = Field(default=24, alias="SEMANTIC_CACHE_TTL_HOURS")
+    # Minimum cosine similarity for a hit; compared as
+    # distance <= 1 - threshold against pgvector's cosine distance.
+    semantic_cache_similarity_threshold: float = Field(
+        default=0.92, alias="SEMANTIC_CACHE_SIMILARITY_THRESHOLD"
+    )
+    # LRU cap on total cached entries; enforced opportunistically on writes.
+    semantic_cache_max_entries: int = Field(
+        default=10_000, alias="SEMANTIC_CACHE_MAX_ENTRIES"
+    )
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
