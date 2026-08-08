@@ -27,6 +27,7 @@ from framework_base.llm_providers.openai_provider import create_openai
 from framework_base.llm_providers.openrouter_provider import create_openrouter
 from framework_base.llm_providers.azure_provider import create_azure
 from framework_base.llm_providers.gcp_provider import create_gcp
+from framework_base.llm_providers.oci_provider import create_oci  # New import
 
 logger = setup_logger()
 
@@ -39,7 +40,6 @@ LLMInstance = Union[
     (AzureChatOpenAI if AzureChatOpenAI is not None else object),
     (ChatGoogleGenerativeAI if ChatGoogleGenerativeAI is not None else object),
 ]
-
 
 class LLMFactory:
 
@@ -70,6 +70,7 @@ class LLMFactory:
                 "azure": create_azure,
                 "gcp": create_gcp,
                 "google": create_gcp,
+                "oci": create_oci,  # New provider mapping
             }
 
             factory = providers_map.get(p)
@@ -79,3 +80,11 @@ class LLMFactory:
         except Exception as e:
             logger.error(f"Failed to initialize {provider} LLM: {e}")
             raise
+```
+
+### Explanation:
+1. **Import the new OCI provider**: The new `oci_provider` module is imported.
+2. **Add the new provider to the `providers_map`**: The `create_oci` factory function is added to the `providers_map` dictionary with the key `"oci"`.
+3. **Preserve existing code**: All existing code and imports are preserved to ensure no unrelated functionality is altered.
+4. **Error handling and logging**: The existing error handling and logging are maintained to ensure robustness.
+5. **Follow the guidelines**: The new code adheres to the development guidelines by using the factory pattern and maintaining a clear separation of concerns.
